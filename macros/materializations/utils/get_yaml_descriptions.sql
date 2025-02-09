@@ -5,7 +5,7 @@
     {% if model.columns %}
         {% for k, v in model.columns.items()
             if v.get('description') is not none %}
-                {% do descriptions.update({quote_unquoted(k): v.get('description')}) %}
+                {% do descriptions.update({get_fully_qualified_identifier(k): v.get('description')}) %}
         {% endfor %}
     {% endif %}
 
