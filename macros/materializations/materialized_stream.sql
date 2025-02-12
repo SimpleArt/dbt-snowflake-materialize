@@ -6,6 +6,7 @@
     {% set change_tracking = config.get('change_tracking', true) %}
     {% set copy_grants = config.get('copy_grants', false) %}
     {% set cluster_by = config.get('cluster_by') %}
+    {% set on_schema_change = config.get('on_schema_change', 'evolve_schema') %}
 
     {% set source_stream_relation = string_to_relation(parse_jinja(config.get('source_stream', ''))['code']) %}
 
@@ -125,8 +126,6 @@
             {% set DDL = 'create or replace' %}
         {% elif not transient and row.get('kind') == 'TRANSIENT' %}
             {% set DDL = 'create or replace' %}
-        {% elif ('Sync: ' ~ sync) in comment %}
-            {% set DDL = 'no op' %}
         {% else %}
             {% set DDL = 'create if not exists' %}
         {% endif %}
@@ -168,7 +167,7 @@
                 select * exclude (metadata$action, metadata$isupdate) from ({{ sql }})
         {% endcall %}
 
-    {% elif execute and DDL != 'no op' and materialize_mode == 'batch_refresh' %}
+    {% elif execute and materialize_mode == 'batch_refresh' %}
         {% set check_schema = true %}
 
         {% call statement('save_stream') %}
@@ -210,7 +209,7 @@
                     ({{ sql }})
         {% endcall %}
 
-    {% elif execute and DDL != 'no op' and materialize_mode == 'aggregate' %}
+    {% elif execute and materialize_mode == 'aggregate' %}
         {% set check_schema = true %}
 
         {% if count_aggs | length == 0 %}
@@ -560,36 +559,27 @@
         {% endif %}
     {% endif %}
 
-    {% if check_schema and DDL == 'create if not exists' %}
-        {% set compare_schema %}
-            select
-                count(distinct h) as schema_count
-            from
-                (
-                    select
-                        hash_agg(
-                            * exclude (
-                                table_catalog,
-                                table_schema,
-                                table_name,
-                                column_default,
-                                is_nullable,
-                                schema_evolution_record,
-                                comment
-                            )
-                        ) as h
-                    from
-                        {{ database }}.information_schema.columns
-                    where
-                        table_schema ilike $${{ target_relation.schema }}$$
-                        and table_name ilike any ($${{ target_relation.identifier }}$$, $${{ temp_relation.identifier }}$$)
-                    group by
-                        table_name
-                )
-        {% endset %}
+    {% if execute and check_schema and DDL == 'create if not exists' %}
+        {% set temp_type = 'table' %}
 
-        {% if run_query(compare_schema)[0]['SCHEMA_COUNT'] == 2 %}
-            {% set DDL = 'create or replace' %}
+        {% if materialize_mode == 'table' %}
+            {% set temp_type = 'view' %}
+        {% endif %}
+
+        {% if evolve_schema(
+            temp_relation.incorporate(type=temp_type),
+            target_relation,
+            transient,
+            (on_schema_change == 'evolve_schema')
+        ) %}
+            {% if on_schema_change == 'fail' %}
+                {% call statement('fail_schema_change') %}
+                    config.on_schema_change: fail
+                        fix: use the dbt --full-refresh flag
+                {% endcall %}
+            {% elif on_schema_change != 'evolve_schema' %}
+                {% set DDL = 'create or replace' %}
+            {% endif %}
         {% endif %}
 
         {% if materialize_mode == 'table' %}
@@ -597,7 +587,6 @@
                 drop view if exists {{ temp_relation }}
             {% endcall %}
         {% endif %}
-
     {% endif %}
 
     {% if execute and materialize_mode == 'batch_refresh' and DDL == 'create if not exists' %}
@@ -697,9 +686,7 @@
 
         {% set row = run_query(stats_query)[0] %}
 
-        {% if row['DELETES'] == 0 and row['INSERTS'] == 0 %}
-            {% set DDL = 'no op' %}
-        {% elif row['DELETES'] == 0 %}
+        {% if row['DELETES'] == 0 %}
             {% set persist_strategy = 'insert_only' %}
         {% elif row['INSERTS'] == 0 %}
             {% set persist_strategy = 'delete_only' %}
@@ -755,16 +742,6 @@
                 {%- if cluster_by is not none %}
                 order by {{ cluster_by | join(', ') }}
                 {%- endif %}
-        {% endcall %}
-
-    {% elif DDL == 'no op' %}
-        {% call statement('main') %}
-            create or replace temporary table {{ store_stream_relation }} as
-                select * from {{ source_stream_relation }}
-        {% endcall %}
-
-        {% call statement('drop_temp') %}
-            drop table if exists {{ store_stream_relation }}
         {% endcall %}
 
     {% elif materialize_mode == 'aggregate' %}
