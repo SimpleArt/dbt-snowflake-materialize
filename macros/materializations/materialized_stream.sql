@@ -560,44 +560,20 @@
         {% endif %}
     {% endif %}
 
-    {% if check_schema and DDL == 'create if not exists' %}
-        {% set compare_schema %}
-            select
-                count(distinct h) as schema_count
-            from
-                (
-                    select
-                        hash_agg(
-                            * exclude (
-                                table_catalog,
-                                table_schema,
-                                table_name,
-                                column_default,
-                                is_nullable,
-                                schema_evolution_record,
-                                comment
-                            )
-                        ) as h
-                    from
-                        {{ database }}.information_schema.columns
-                    where
-                        table_schema ilike $${{ target_relation.schema }}$$
-                        and table_name ilike any ($${{ target_relation.identifier }}$$, $${{ temp_relation.identifier }}$$)
-                    group by
-                        table_name
-                )
-        {% endset %}
+    {% if execute and check_schema and DDL == 'create if not exists' %}
+        {% set temp_type = 'table' %}
 
-        {% if run_query(compare_schema)[0]['SCHEMA_COUNT'] == 2 %}
-            {% set DDL = 'create or replace' %}
+        {% if materialize_mode == 'table' %}
+            {% set temp_type = 'view' %}
         {% endif %}
+
+        {% do evolve_schema(temp_relation.incorporate(type=temp_type), target_relation, transient) %}
 
         {% if materialize_mode == 'table' %}
             {% call statement('drop_temp_relation') %}
                 drop view if exists {{ temp_relation }}
             {% endcall %}
         {% endif %}
-
     {% endif %}
 
     {% if execute and materialize_mode == 'batch_refresh' and DDL == 'create if not exists' %}

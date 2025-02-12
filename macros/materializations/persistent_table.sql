@@ -46,7 +46,7 @@
     {% endif %}
 
     {% set target_relation = get_fully_qualified_relation(this).incorporate(type='table') %}
-    {% set temp_relation = make_temp_relation(target_relation).incorporate(type=tmp_relation_type) %}
+    {% set temp_relation = get_fully_qualified_relation(make_temp_relation(target_relation).incorporate(type=tmp_relation_type)) %}
     {% set delta_keys_relation = make_temp_relation(temp_relation).incorporate(type='table') %}
     {% set delta_relation = make_temp_relation(delta_keys_relation).incorporate(type='table') %}
 
@@ -78,45 +78,11 @@
         {% endcall %}
     {% endif %}
 
-    {% set table_count = 1 %}
-    {% set schema_count = 2 %}
-
     {% if DDL == 'create if not exists' and execute %}
-        {% set compare_schema %}
-            select
-                count(*) as table_count,
-                count(distinct h) as schema_count
-            from
-                (
-                    select
-                        hash_agg(
-                            * exclude (
-                                table_catalog,
-                                table_schema,
-                                table_name,
-                                column_default,
-                                is_nullable,
-                                schema_evolution_record,
-                                comment
-                            )
-                        ) as h
-                    from
-                        {{ database }}.information_schema.columns
-                    where
-                        table_schema ilike $${{ target_relation.schema }}$$
-                        and table_name ilike any ($${{ target_relation.identifier }}$$, $${{ temp_relation.identifier }}$$)
-                    group by
-                        table_name
-                )
-        {% endset %}
-
-        {% set row = run_query(compare_schema)[0] %}
-        {% set table_count = row['TABLE_COUNT'] %}
-        {% set schema_count = row['SCHEMA_COUNT'] %}
+        {% do evolve_schema(temp_relation, target_relation, transient) %}
     {% endif %}
 
     {% if DDL == 'create or replace' or not execute
-        or schema_count == 2 or table_count == 1
         or persist_strategy not in ['delete+insert', 'insert_overwrite', 'merge']
     %}
         {% set DDL = 'create or replace' %}
@@ -332,7 +298,11 @@
         {% call statement('main') %}
             {{ sql_header if sql_header is not none }}
 
-            insert into {{ target_relation }}
+            insert into {{ target_relation }}(
+                {%- for column in adapter.get_columns_in_relation(delta_relation) %}
+                {{ adapter.quote(column.name) }} {{- ',' if not loop.last }}
+                {%- endfor %}
+            )
                 select * from {{ delta_relation }}
         {% endcall %}
 
@@ -445,7 +415,11 @@
         {% call statement('main') %}
             {{ sql_header if sql_header is not none }}
 
-            insert into {{ target_relation }}
+            insert into {{ target_relation }}(
+                {%- for column in adapter.get_columns_in_relation(temp_relation) %}
+                {{ adapter.quote(column.name) }} {{- ',' if not loop.last }}
+                {%- endfor %}
+            )
                 select * from (
                     select
                         source.*
@@ -469,7 +443,11 @@
 
     {% elif persist_strategy == 'insert_overwrite' %}
         {% call statement('main') %}
-            insert overwrite into {{ target_relation }}
+            insert overwrite into {{ target_relation }}(
+                {%- for column in adapter.get_columns_in_relation(temp_relation) %}
+                {{ adapter.quote(column.name) }} {{- ',' if not loop.last }}
+                {%- endfor %}
+            )
                 select * from {{ temp_relation }}
                 {%- if cluster_by is not none %}
                 order by

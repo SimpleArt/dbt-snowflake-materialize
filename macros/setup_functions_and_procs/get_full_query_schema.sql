@@ -6,5 +6,5 @@
         f"    select * from table(result_scan('{job.query_id}'))"
     ).collect()
     returns = session.sql({{ get_full_table_schema(temp_relation, describe_table(temp_relation).replace('$', '{chr(36)}')) }}).collect()[0][0]
-    session.sql("drop table if exists {{ temp_relation }}").collect()
+    session.sql("drop table if exists {{ temp_relation }}").collect_nowait()
 {%- endmacro -%}

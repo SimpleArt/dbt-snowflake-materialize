@@ -42,7 +42,7 @@ def create_describe_table(session):
     ).collect_nowait()
     job.result()
     returns = session.sql({{ get_full_table_schema(temp_relation, "result_scan('{job.query_id}')") }}).collect()[0][0]
-    session.sql("drop table if exists {{ temp_relation }}").collect()
+    session.sql("drop table if exists {{ temp_relation }}").collect_nowait()
     return session.sql(
         f"create or replace procedure {{ target_relation }}(table_name varchar)\n"
         f"    returns table({returns})\n"
