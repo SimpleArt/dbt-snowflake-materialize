@@ -78,14 +78,17 @@ inner join
 {% endmacro %}
 
 {% macro evolve_schema(from_relation, to_relation, transient) %}
+    {% set flag = false %}
     {% if execute %}
         {% set row = run_query(compare_schema(from_relation, to_relation, transient))[0] %}
         {% if row['DROP_COLUMNS'] is not none %}
+            {% set flag = true %}
             {% do run_query(row['DROP_COLUMNS']) %}
         {% endif %}
         {% if row['ADD_COLUMNS'] is not none %}
+            {% set flag = true %}
             {% do run_query(row['ADD_COLUMNS']) %}
         {% endif %}
     {% endif %}
-    {{ return(none) }}
+    {{ return(flag) }}
 {% endmacro %}

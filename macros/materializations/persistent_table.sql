@@ -79,7 +79,9 @@
     {% endif %}
 
     {% if DDL == 'create if not exists' and execute %}
-        {% do evolve_schema(temp_relation, target_relation, transient) %}
+        {% if evolve_schema(temp_relation, target_relation, transient) %}
+            {% set persist_strategy = 'insert_overwrite' %}
+        {% endif %}
     {% endif %}
 
     {% if DDL == 'create or replace' or not execute
