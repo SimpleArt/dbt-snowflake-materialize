@@ -77,17 +77,21 @@ inner join
         using(column_name)
 {% endmacro %}
 
-{% macro evolve_schema(from_relation, to_relation, transient) %}
+{% macro evolve_schema(from_relation, to_relation, transient, apply_changes) %}
     {% set flag = false %}
     {% if execute %}
         {% set row = run_query(compare_schema(from_relation, to_relation, transient))[0] %}
         {% if row['DROP_COLUMNS'] is not none %}
             {% set flag = true %}
-            {% do run_query(row['DROP_COLUMNS']) %}
+            {% if apply_changes %}
+                {% do run_query(row['DROP_COLUMNS']) %}
+            {% endif %}
         {% endif %}
         {% if row['ADD_COLUMNS'] is not none %}
             {% set flag = true %}
-            {% do run_query(row['ADD_COLUMNS']) %}
+            {% if apply_changes %}
+                {% do run_query(row['ADD_COLUMNS']) %}
+            {% endif %}
         {% endif %}
     {% endif %}
     {{ return(flag) }}

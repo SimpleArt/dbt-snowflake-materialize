@@ -6,6 +6,7 @@
     {% set change_tracking = config.get('change_tracking', true) %}
     {% set copy_grants = config.get('copy_grants', false) %}
     {% set cluster_by = config.get('cluster_by') %}
+    {% set on_schema_change = config.get('on_schema_change', 'full_refresh') %}
 
     {% set source_stream_relation = string_to_relation(parse_jinja(config.get('source_stream', ''))['code']) %}
 
@@ -565,7 +566,21 @@
             {% set temp_type = 'view' %}
         {% endif %}
 
-        {% do evolve_schema(temp_relation.incorporate(type=temp_type), target_relation, transient) %}
+        {% if evolve_schema(
+            temp_relation.incorporate(type=temp_type),
+            target_relation,
+            transient,
+            (on_schema_change == 'evolve_schema')
+        ) %}
+            {% if on_schema_change == 'fail' %}
+                {% call statement('fail_schema_change') %}
+                    config.on_schema_change: fail
+                        fix: use the dbt --full-refresh flag
+                {% endcall %}
+            {% elif on_schema_change != 'evolve_schema' %}
+                {% set DDL = 'create or replace' %}
+            {% endif %}
+        {% endif %}
 
         {% if materialize_mode == 'table' %}
             {% call statement('drop_temp_relation') %}

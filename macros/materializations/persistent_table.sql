@@ -14,6 +14,8 @@
         {% set persist_strategy = config.get('persist_strategy', 'insert_overwrite') %}
     {% endif %}
 
+    {% set on_schema_change = config.get('on_schema_change', 'full_refresh') %}
+
     {% if persist_strategy in ['delete+insert', 'merge'] %}
         {% set change_tracking = config.get('change_tracking', true) %}
     {% else %}
@@ -81,6 +83,32 @@
     {% if DDL == 'create if not exists' and execute %}
         {% if evolve_schema(temp_relation, target_relation, transient) %}
             {% set persist_strategy = 'insert_overwrite' %}
+        {% endif %}
+    {% endif %}
+
+    {% if execute and DDL == 'create if not exists' %}
+        {% if evolve_schema(
+            temp_relation,
+            target_relation,
+            transient,
+            (on_schema_change == 'evolve_schema')
+        ) %}
+            {% if on_schema_change == 'fail' %}
+                {% call statement('fail_schema_change') %}
+                    config.on_schema_change: fail
+                        fix: use the dbt --full-refresh flag
+                {% endcall %}
+            {% elif on_schema_change == 'evolve_schema' %}
+                {% set persist_strategy = 'insert_overwrite' %}
+            {% else %}
+                {% set DDL = 'create or replace' %}
+            {% endif %}
+        {% endif %}
+
+        {% if materialize_mode == 'table' %}
+            {% call statement('drop_temp_relation') %}
+                drop view if exists {{ temp_relation }}
+            {% endcall %}
         {% endif %}
     {% endif %}
 
