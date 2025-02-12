@@ -125,8 +125,6 @@
             {% set DDL = 'create or replace' %}
         {% elif not transient and row.get('kind') == 'TRANSIENT' %}
             {% set DDL = 'create or replace' %}
-        {% elif ('Sync: ' ~ sync) in comment %}
-            {% set DDL = 'no op' %}
         {% else %}
             {% set DDL = 'create if not exists' %}
         {% endif %}
@@ -168,7 +166,7 @@
                 select * exclude (metadata$action, metadata$isupdate) from ({{ sql }})
         {% endcall %}
 
-    {% elif execute and DDL != 'no op' and materialize_mode == 'batch_refresh' %}
+    {% elif execute and materialize_mode == 'batch_refresh' %}
         {% set check_schema = true %}
 
         {% call statement('save_stream') %}
@@ -210,7 +208,7 @@
                     ({{ sql }})
         {% endcall %}
 
-    {% elif execute and DDL != 'no op' and materialize_mode == 'aggregate' %}
+    {% elif execute and materialize_mode == 'aggregate' %}
         {% set check_schema = true %}
 
         {% if count_aggs | length == 0 %}
@@ -673,9 +671,7 @@
 
         {% set row = run_query(stats_query)[0] %}
 
-        {% if row['DELETES'] == 0 and row['INSERTS'] == 0 %}
-            {% set DDL = 'no op' %}
-        {% elif row['DELETES'] == 0 %}
+        {% if row['DELETES'] == 0 %}
             {% set persist_strategy = 'insert_only' %}
         {% elif row['INSERTS'] == 0 %}
             {% set persist_strategy = 'delete_only' %}
@@ -731,16 +727,6 @@
                 {%- if cluster_by is not none %}
                 order by {{ cluster_by | join(', ') }}
                 {%- endif %}
-        {% endcall %}
-
-    {% elif DDL == 'no op' %}
-        {% call statement('main') %}
-            create or replace temporary table {{ store_stream_relation }} as
-                select * from {{ source_stream_relation }}
-        {% endcall %}
-
-        {% call statement('drop_temp') %}
-            drop table if exists {{ store_stream_relation }}
         {% endcall %}
 
     {% elif materialize_mode == 'aggregate' %}
