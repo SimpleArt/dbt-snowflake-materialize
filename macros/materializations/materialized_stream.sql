@@ -6,7 +6,7 @@
     {% set change_tracking = config.get('change_tracking', true) %}
     {% set copy_grants = config.get('copy_grants', false) %}
     {% set cluster_by = config.get('cluster_by') %}
-    {% set on_schema_change = config.get('on_schema_change', 'full_refresh') %}
+    {% set on_schema_change = config.get('on_schema_change', 'evolve_schema') %}
 
     {% set source_stream_relation = string_to_relation(parse_jinja(config.get('source_stream', ''))['code']) %}
 
