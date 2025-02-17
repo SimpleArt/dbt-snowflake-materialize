@@ -30,11 +30,19 @@
                 {% endif %}
             {% endfor %}
 
-        {# If no matching function/procedure is found, drop all functions/procedures. #}
-        {% else %}
-            {% for row in rows %}
+        {# If should not be a function, drop all functions. #}
+        {% elif type == 'function' %}
+            {% for row in run_query(show_relation(relation, 'user function')) %}
                 {% call statement('drop_callable') %}
-                    drop {{ type }} if exists {{ relation }}({{ row['arguments'][(relation.identifier|length + 1):].split(') RETURN ')[0] }})
+                    drop function if exists {{ relation }}({{ row['arguments'][(relation.identifier|length + 1):].split(') RETURN ')[0] }})
+                {% endcall %}
+            {% endfor %}
+
+        {# If should not be a procedure, drop all procedures. #}
+        {% else %}
+            {% for row in run_query(show_relation(relation, 'procedure')) %}
+                {% call statement('drop_callable') %}
+                    drop procedure if exists {{ relation }}({{ row['arguments'][(relation.identifier|length + 1):].split(') RETURN ')[0] }})
                 {% endcall %}
             {% endfor %}
 
