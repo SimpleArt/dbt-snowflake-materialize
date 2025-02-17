@@ -27,10 +27,10 @@
         {% if type == drop_unless_type %}
             {% for row in results if row['name'] == relation.identifier %}
                 {% set comment = row.get('comment', row.get('description', '')) %}
-                {% set state = {'flag': false} %}
+                {% set state = {'flag': true} %}
 
-                {% for part in metadata if part in comment %}
-                    {% do state.update({'flag': true}) %}
+                {% for part in metadata if part not in comment %}
+                    {% do state.update({'flag': false}) %}
                 {% endfor %}
 
                 {% if state['flag'] %}

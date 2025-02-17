@@ -93,9 +93,9 @@
         {% endif %}
 
     {% else %}
-        {% set success = run_query(sql_try_except(create_or_replace))[0]['SUCCESS'] %}
+        {% set status = run_query(sql_try_except(create_or_replace))[0]['STATUS'] %}
 
-        {% if success %}
+        {% if status == 'success' %}
             {% call statement('main') %}
                 {{- sql_run_safe(create_if_not_exists) -}}
             {% endcall %}
@@ -217,9 +217,9 @@
             {% endif %}
 
         {% else %}
-            {% set success = run_query(sql_try_except(create_or_replace))[0]['STATUS'] %}
+            {% set statue = run_query(sql_try_except(create_or_replace))[0]['STATUS'] %}
 
-            {% if not success %}
+            {% if status != 'success' %}
                 {% do drop_relation(overload_relation, 'table', ['Aggregate: ' ~ aggregate, 'Query Hash: ' ~ sql_hash]) %}
                 {% do run_query(create_or_replace) %}
             {% endif %}
