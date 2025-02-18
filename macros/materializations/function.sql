@@ -42,22 +42,6 @@
     --------------------------------------------------------------------------------------------------------------------
     -- build model
 
-    {% set create_if_not_exists %}
-        {{ sql_header if sql_header is not none }}
-
-        create {{- " secure" if secure }} {{- " aggregate" if aggregate }} function if not exists {{ target_relation }}({{ parameters }})
-            returns {{ returns }}
-            {%- if language is not none %}
-            {%- for language_name, language_configs in language.items() %}
-            language {{ language_name }}
-            {%- for language_config in language_configs %}
-            {{ language_config }}
-            {%- endfor %}
-            {%- endfor %}
-            {%- endif %}
-        as $${{ sql }}$$
-    {% endset %}
-
     {% set create_or_replace %}
         {{ sql_header if sql_header is not none }}
 
@@ -76,17 +60,15 @@
     {% endset %}
 
     {% if DDL == 'create if not exists' %}
-        {% if secure is not none and secure %}
+        {% call statement('main') %}
+            select 'already exists' as status
+        {% endcall %}
+
+        {% if secure %}
             {% call statement('set_secure') %}
                 alter function {{ target_relation }}{{ arguments }} set secure
             {% endcall %}
-        {% endif %}
-
-        {% call statement('main') %}
-            {{- sql_run_safe(create_if_not_exists) -}}
-        {% endcall %}
-
-        {% if secure is not none and not secure %}
+        {% elif secure is not none %}
             {% call statement('unset_secure') %}
                 alter function {{ target_relation }}{{ arguments }} unset secure
             {% endcall %}
@@ -97,7 +79,7 @@
 
         {% if status == 'success' %}
             {% call statement('main') %}
-                {{- sql_run_safe(create_if_not_exists) -}}
+                select 'success' as status
             {% endcall %}
 
         {% else %}
@@ -169,22 +151,6 @@
 
         {% set DDL = drop_relation(overload_relation, 'function', ['Query Hash: ' ~ sql_hash]) %}
 
-        {% set create_if_not_exists %}
-            {{ sql_header if sql_header is not none }}
-
-            create {{- " secure" if secure }} {{- " aggregate" if aggregate }} function if not exists {{ overload_relation }}({{ parameters }})
-                returns {{ returns }}
-                {%- if language is not none %}
-                {%- for language_name, language_configs in language.items() %}
-                language {{ language_name }}
-                {%- for language_config in language_configs %}
-                {{ language_config }}
-                {%- endfor %}
-                {%- endfor %}
-                {%- endif %}
-            as $${{ sql }}$$
-        {% endset %}
-
         {% set create_or_replace %}
             {{ sql_header if sql_header is not none }}
 
@@ -202,15 +168,11 @@
         {% endset %}
 
         {% if DDL == 'create if not exists' %}
-            {% if secure is not none and secure %}
+            {% if secure %}
                 {% call statement('set_secure') %}
                     alter function {{ overload_relation }}{{ arguments }} set secure
                 {% endcall %}
-            {% endif %}
-
-            {% do run_query(sql_run_safe(create_if_not_exists)) %}
-
-            {% if secure is not none and not secure %}
+            {% elif secure is not none %}
                 {% call statement('unset_secure') %}
                     alter function {{ overload_relation }}{{ arguments }} unset secure
                 {% endcall %}
