@@ -2,10 +2,10 @@
     {% set original_query_tag = set_query_tag() %}
     {% set sql_header = config.get('sql_header') %}
 
-    {% set secure = config.get('secure', false) %}
+    {% set secure = config.get('secure') %}
     {% set recursive = config.get('recursive', false) %}
-    {% set change_tracking = config.get('change_tracking', false) %}
-    {% set copy_grants = config.get('copy_grants', false) %}
+    {% set change_tracking = config.get('change_tracking') %}
+    {% set copy_grants = config.get('copy_grants') %}
 
     {% if recursive %}
         {% set change_tracking = false %}
@@ -31,18 +31,13 @@
     -- build model
     {% if DDL == 'create if not exists' %}
 
-        {% if not change_tracking %}
-            {% call statement('set_change_tracking') %}
-                alter view if exists {{ target_relation }} set
-                    change_tracking = false
-            {% endcall %}
-        {% endif %}
-
         {% call statement('main') %}
             {{ sql_header if sql_header is not none }}
 
             create {{- " secure" if secure }} {{- " recursive" if recursive }} view if not exists {{ target_relation }}
+                {%- if change_tracking is not none %}
                 change_tracking = {{ change_tracking }}
+                {%- endif %}
             as
                 /* Recursive: {{ recursive }} */
                 /* Query Hash: {{ sql_hash }} */
@@ -53,7 +48,7 @@
             {% call statement('set_secure') %}
                 alter view {{ target_relation }} set secure
             {% endcall %}
-        {% else %}
+        {% elif secure is not none %}
             {% call statement('unset_secure') %}
                 alter view {{ target_relation }} unset secure
             {% endcall %}
@@ -63,6 +58,11 @@
             {% call statement('set_change_tracking') %}
                 alter view if exists {{ target_relation }} set
                     change_tracking = true
+            {% endcall %}
+        {% elif change_tracking is not none %}
+            {% call statement('set_change_tracking') %}
+                alter view if exists {{ target_relation }} set
+                    change_tracking = false
             {% endcall %}
         {% endif %}
 
