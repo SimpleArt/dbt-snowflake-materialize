@@ -78,15 +78,7 @@
                 {{ sql }}
                 {%- endif %}
         {% endcall %}
-    {% endif %}
 
-    {% if DDL == 'create if not exists' and execute %}
-        {% if evolve_schema(temp_relation, target_relation, transient) %}
-            {% set persist_strategy = 'insert_overwrite' %}
-        {% endif %}
-    {% endif %}
-
-    {% if execute and DDL == 'create if not exists' %}
         {% if evolve_schema(
             temp_relation,
             target_relation,
@@ -103,12 +95,6 @@
             {% else %}
                 {% set DDL = 'create or replace' %}
             {% endif %}
-        {% endif %}
-
-        {% if materialize_mode == 'table' %}
-            {% call statement('drop_temp_relation') %}
-                drop view if exists {{ temp_relation }}
-            {% endcall %}
         {% endif %}
     {% endif %}
 
