@@ -110,7 +110,7 @@
     {% endif %}
 
     {% if config.persist_relation_docs() %}
-        {% do custom_persist_docs(target_relation, model, 'function', 'Aggregate: ' ~ aggregate ~ '\nQuery Hash: ' ~ sql_hash, arguments) %}
+        {% do custom_persist_docs(target_relation, model, 'function', '\nAggregate: ' ~ aggregate ~ '\nQuery Hash: ' ~ sql_hash, arguments) %}
     {% endif %}
 
     {% if overload_version is boolean and overload_version %}
@@ -197,7 +197,7 @@
         {% endif %}
 
         {% if config.persist_relation_docs() %}
-            {% do custom_persist_docs(overload_relation, model, 'function', 'Aggregate: ' ~ aggregate ~ '\nQuery Hash: ' ~ sql_hash, arguments) %}
+            {% do custom_persist_docs(overload_relation, model, 'function', '\nAggregate: ' ~ aggregate ~ '\nQuery Hash: ' ~ sql_hash, arguments) %}
         {% endif %}
 
     {% endif %}

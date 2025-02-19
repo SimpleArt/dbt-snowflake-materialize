@@ -109,7 +109,7 @@
     {% endif %}
 
     {% if config.persist_relation_docs() %}
-        {% do custom_persist_docs(target_relation, model, 'procedure', 'Query Hash: ' ~ sql_hash, arguments) %}
+        {% do custom_persist_docs(target_relation, model, 'procedure', '\nQuery Hash: ' ~ sql_hash, arguments) %}
     {% endif %}
 
     {% if overload_version is boolean and overload_version %}
