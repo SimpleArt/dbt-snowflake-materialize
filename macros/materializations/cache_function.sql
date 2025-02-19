@@ -50,7 +50,7 @@
         {% endif %}
 
         {% if state == {} %}
-            {% set DDL = drop_relation(target_relation, 'table') %}
+            {% set DDL = drop_relation_unless(target_relation, 'table') %}
         {% elif ('Function Hash: ' ~ sql_hash) not in comment %}
             {% set DDL = 'create or replace' %}
         {% elif transient and row.get('IS_TRANSIENT') != 'YES' %}
@@ -61,7 +61,7 @@
             {% set DDL = 'create if not exists' %}
         {% endif %}
     {% else %}
-        {% set DDL = drop_relation(target_relation, 'table', ['Function Hash: ' ~ sql_hash], transient) %}
+        {% set DDL = drop_relation_unless(target_relation, 'table', ['Function Hash: ' ~ sql_hash], transient) %}
         {% set prefix = '' %}
     {% endif %}
 

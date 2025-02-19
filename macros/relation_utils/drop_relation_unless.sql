@@ -1,4 +1,4 @@
-{% macro drop_relation(relation, drop_unless_type=none, metadata=none, transient=none) %}
+{% macro drop_relation_unless(relation, drop_unless_type=none, metadata=none, transient=none) %}
 
     {% set result = get_relation_type(relation, drop_unless_type) %}
     {% set type = result.get('type') %}

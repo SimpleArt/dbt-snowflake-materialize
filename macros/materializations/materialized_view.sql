@@ -10,7 +10,7 @@
 
     {% set sql_hash = local_md5(sql) %}
 
-    {% set DDL = drop_relation(target_relation, 'materialized view', ['Query Hash: ' ~ sql_hash]) %}
+    {% set DDL = drop_relation_unless(target_relation, 'materialized view', ['Query Hash: ' ~ sql_hash]) %}
 
     {% if should_full_refresh() %}
         {% set DDL = 'create or replace' %}

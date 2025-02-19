@@ -27,7 +27,7 @@
         ~ local_md5(sql)
     ) %}
 
-    {% set DDL = drop_relation(target_relation, 'function', ['Aggregate: ' ~ aggregate, 'Query Hash: ' ~ sql_hash]) %}
+    {% set DDL = drop_relation_unless(target_relation, 'function', ['Aggregate: ' ~ aggregate, 'Query Hash: ' ~ sql_hash]) %}
 
     {% if should_full_refresh() %}
         {% set DDL = 'create or replace' %}
@@ -83,7 +83,7 @@
             {% endcall %}
 
         {% else %}
-            {% do drop_relation(target_relation, 'table', ['Aggregate: ' ~ aggregate, 'Query Hash: ' ~ sql_hash]) %}
+            {% do drop_relation_unless(target_relation, 'table', ['Aggregate: ' ~ aggregate, 'Query Hash: ' ~ sql_hash]) %}
 
             {% call statement('main') %}
                 {{- sql_run_safe(create_or_replace) -}}
@@ -149,7 +149,7 @@
             path={'identifier': overload_identifier}
         ) %}
 
-        {% set DDL = drop_relation(overload_relation, 'function', ['Query Hash: ' ~ sql_hash]) %}
+        {% set DDL = drop_relation_unless(overload_relation, 'function', ['Aggregate: ' ~ aggregate, 'Query Hash: ' ~ sql_hash]) %}
 
         {% set create_or_replace %}
             {{ sql_header if sql_header is not none }}
@@ -182,7 +182,7 @@
             {% set statue = run_query(sql_try_except(create_or_replace))[0]['STATUS'] %}
 
             {% if status != 'success' %}
-                {% do drop_relation(overload_relation, 'table', ['Aggregate: ' ~ aggregate, 'Query Hash: ' ~ sql_hash]) %}
+                {% do drop_relation_unless(overload_relation, 'table', ['Aggregate: ' ~ aggregate, 'Query Hash: ' ~ sql_hash]) %}
                 {% do run_query(create_or_replace) %}
             {% endif %}
 

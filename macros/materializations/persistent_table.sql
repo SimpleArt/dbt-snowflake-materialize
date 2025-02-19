@@ -52,7 +52,7 @@
     {% set delta_keys_relation = make_temp_relation(temp_relation).incorporate(type='table') %}
     {% set delta_relation = make_temp_relation(delta_keys_relation).incorporate(type='table') %}
 
-    {% set DDL = drop_relation(target_relation, 'table', none, transient) %}
+    {% set DDL = drop_relation_unless(target_relation, 'table', none, transient) %}
 
     {% if should_full_refresh() %}
         {% set DDL = 'create or replace' %}

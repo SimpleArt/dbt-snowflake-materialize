@@ -119,7 +119,7 @@
         {% set comment = row.get('comment', row.get('description', '')) %}
 
         {% if state == {} %}
-            {% set DDL = drop_relation(target_relation, 'table') %}
+            {% set DDL = drop_relation_unless(target_relation, 'table') %}
         {% elif ('Query Hash: ' ~ sql_hash) not in comment %}
             {% set DDL = 'create or replace' %}
         {% elif transient and row.get('kind') != 'TRANSIENT' %}
@@ -141,7 +141,7 @@
     {% else %}
         {% set sync = '' %}
         {% set sql_hash = '' %}
-        {% set DDL = drop_relation(target_relation, 'table', none, transient) %}
+        {% set DDL = drop_relation_unless(target_relation, 'table', none, transient) %}
         {% set prefix = '' %}
     {% endif %}
 

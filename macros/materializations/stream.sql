@@ -16,7 +16,7 @@
 
     {% set target_relation = get_fully_qualified_relation(this) %}
 
-    {% set query = ' ' ~ (sql.lower().split() | join(' ')) %}
+    {% set query = ' ' ~ (sql.lower().split() | join(' ')).replace('*/', '*/ ') %}
 
     {% if ' on table ' in query %}
         {% set source_type = 'table' %}
@@ -35,7 +35,7 @@
         ~ local_md5(sql)
     ) %}
 
-    {% set DDL = drop_relation(target_relation, 'stream', ['Query Hash: ' ~ sql_hash]) %}
+    {% set DDL = drop_relation_unless(target_relation, 'stream', ['Query Hash: ' ~ sql_hash]) %}
 
     {% if should_full_refresh() %}
         {% set DDL = 'create or replace' %}
