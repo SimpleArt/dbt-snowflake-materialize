@@ -14,7 +14,7 @@
         {% set persist_strategy = config.get('persist_strategy', 'insert_overwrite') %}
     {% endif %}
 
-    {% set on_schema_change = config.get('on_schema_change', 'full_refresh') %}
+    {% set on_schema_change = config.get('on_schema_change', 'evolve_schema') %}
 
     {% if persist_strategy in ['delete+insert', 'merge'] %}
         {% set change_tracking = config.get('change_tracking', true) %}
