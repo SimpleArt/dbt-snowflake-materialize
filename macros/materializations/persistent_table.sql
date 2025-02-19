@@ -16,11 +16,7 @@
 
     {% set on_schema_change = config.get('on_schema_change', 'evolve_schema') %}
 
-    {% if persist_strategy in ['delete+insert', 'merge'] %}
-        {% set change_tracking = config.get('change_tracking', true) %}
-    {% else %}
-        {% set change_tracking = config.get('change_tracking', false) %}
-    {% endif %}
+    {% set change_tracking = config.get('change_tracking') %}
 
     {% set tmp_relation_type = config.get('tmp_relation_type', 'view') %}
     {% set cluster_by = config.get('cluster_by') %}
@@ -243,7 +239,7 @@
     {% endif %}
 
     {% if DDL == 'create if not exists' %}
-        {% if not change_tracking %}
+        {% if change_tracking is not none and not change_tracking %}
             {% call statement('unset_change_tracking') %}
                 alter table if exists {{ target_relation }} set
                     change_tracking = false
