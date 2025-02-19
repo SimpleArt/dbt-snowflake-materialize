@@ -72,7 +72,9 @@
             {{ sql_header if sql_header is not none }}
 
             create or replace {{- " secure" if secure }} {{- " recursive" if recursive }} view {{ target_relation }}
+                {%- if change_tracking is not none %}
                 change_tracking = {{ change_tracking }}
+                {%- endif %}
                 {%- if copy_grants %}
                 copy grants
                 {%- endif %}
