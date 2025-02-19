@@ -9,9 +9,9 @@
     {% set checksum = config.get('check_cols') %}
 
     {% if unique_key is none %}
-        {% set persist_strategy = config.get('persist_strategy', 'merge') %}
-    {% else %}
         {% set persist_strategy = config.get('persist_strategy', 'insert_overwrite') %}
+    {% else %}
+        {% set persist_strategy = config.get('persist_strategy', 'merge') %}
     {% endif %}
 
     {% set on_schema_change = config.get('on_schema_change', 'evolve_schema') %}
