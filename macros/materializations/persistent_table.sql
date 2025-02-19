@@ -5,7 +5,7 @@
     {% set transient = config.get('transient', true) %}
     {% set copy_grants = config.get('copy_grants', false) %}
 
-    {$ set unique_key = config.get('unique_key') %}
+    {% set unique_key = config.get('unique_key') %}
     {% set checksum = config.get('check_cols') %}
 
     {% if unique_key is none %}
