@@ -233,6 +233,20 @@
                 {% set persist_strategy = 'delete+insert' %}
             {% elif all_keys != [] and row['SOURCE_KEY_COUNT'] <= 1 and row['DESTINATION_KEY_COUNT'] <= 1 %}
                 {% set incremental_keys = all_keys %}
+
+                {% call statement('delta_keys_aggregated') %}
+                    create or replace temporary table {{ delta_keys_relation }} as
+                        select
+                            {%- for column in all_keys %}
+                            {{ column }},
+                            {%- endfor %}
+                            sum({{ adapter.quote('persistent$source_row_count') }}) as {{ adapter.quote('persistent$source_row_count') }},
+                            sum({{ adapter.quote('persistent$destination_row_count') }}) as {{ adapter.quote('persistent$destination_row_count') }}
+                        from
+                            {{ delta_keys_relation }}
+                        group by
+                            all
+                {% endcall %}
             {% endif %}
         {% endif %}
 
@@ -383,7 +397,7 @@
                 {%- endif %}
             on
                 {%- for column in incremental_keys %}
-                {{ "and " if not loop.first -}} destination.{{ column }} is distinct from delta.{{ column }}
+                {{ "and " if not loop.first -}} destination.{{ column }} is not distinct from delta.{{ column }}
                 {%- endfor %}
             when not matched and delta.{{ adapter.quote('persistent$merge_action') }} = 'insert' then
                 insert (
