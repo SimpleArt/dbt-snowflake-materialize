@@ -3,7 +3,7 @@
     {% set sql_header = config.get('sql_header') %}
 
     {% set transient = config.get('transient', false) %}
-    {% set change_tracking = config.get('change_tracking', true) %}
+    {% set change_tracking = config.get('change_tracking') %}
     {% set copy_grants = config.get('copy_grants', false) %}
     {% set cluster_by = config.get('cluster_by') %}
     {% set on_schema_change = config.get('on_schema_change', 'evolve_schema') %}
@@ -705,17 +705,10 @@
     {% endif %}
 
     {% if DDL == 'create if not exists' %}
-        {% if not change_tracking %}
+        {% if change_tracking is not none and not change_tracking %}
             {% call statement('unset_change_tracking') %}
                 alter table if exists {{ target_relation }} set
                     change_tracking = false
-            {% endcall %}
-        {% endif %}
-
-        {% if cluster_by is none %}
-            {% call statement('drop_cluster_by') %}
-                alter table if exists {{ target_relation }}
-                    drop clustering key
             {% endcall %}
         {% endif %}
     {% endif %}

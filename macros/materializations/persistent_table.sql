@@ -246,7 +246,7 @@
             {% endcall %}
         {% endif %}
 
-        {% if cluster_by is none %}
+        {% if cluster_by == [] %}
             {% call statement('drop_clustering_key') %}
                 alter table if exists {{ target_relation }}
                     drop clustering key
@@ -470,7 +470,7 @@
     {% endif %}
 
     {% if DDL == 'create if not exists' %}
-        {% if cluster_by is not none %}
+        {% if cluster_by %}
             {% call statement('set_clustering_key') %}
                 alter table if exists {{ target_relation }}
                     cluster by ({{ cluster_by | join(', ') }})
