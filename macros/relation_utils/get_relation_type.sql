@@ -72,7 +72,7 @@
 
         {% set rows = run_query(query) %}
         {% for row in rows %}
-            {{ return({'type': row['MATERIALIZATION', 'rows': rows}) }}
+            {{ return({'type': row['MATERIALIZATION'], 'rows': rows}) }}
         {% endfor %}
 
         {% if type != 'stream' %}
