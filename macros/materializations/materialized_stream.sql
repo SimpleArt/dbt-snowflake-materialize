@@ -226,6 +226,7 @@
                                     metadata$action,
                                     metadata$isupdate,
                                     metadata$row_id
+                                {%- if aggregate %}
                                 ) replace (
                                     {%- for column, agg in aggregate %}
                                     {%- if agg == 'sum' %}
@@ -234,6 +235,7 @@
                                     {{ agg }}(decode(metadata$action, 'INSERT', {{ column }})) as {{ column }}
                                     {%- endif %} {{- ',' if not loop.last }}
                                     {%- endfor %}
+                                {%- endif %}
                                 ),
                                 sum(decode(metadata$action, 'INSERT', 1, -1)) as metadata$row_count
                             from
@@ -285,6 +287,7 @@
                                     metadata$action,
                                     metadata$isupdate,
                                     metadata$row_id
+                                {%- if aggregate %}
                                 ) replace (
                                     {%- for column, agg in aggregate if agg != 'count_agg' %}
                                     {%- if agg == 'sum' %}
@@ -293,6 +296,7 @@
                                     {{ agg }}(decode(metadata$action, 'INSERT', {{ column }})) as {{ column }}
                                     {%- endif %} {{- ',' if not loop.last }}
                                     {%- endfor %}
+                                {%- endif %}
                                 ),
                                 sum(decode(metadata$action, 'INSERT', 1, -1)) as metadata$row_count
                             from
@@ -337,6 +341,7 @@
                                     metadata$action,
                                     metadata$isupdate,
                                     metadata$row_id
+                                {%- if aggregate %}
                                 ) replace (
                                     {%- for column, agg in aggregate if agg != 'count_agg' %}
                                     {%- if agg == 'sum' %}
@@ -345,6 +350,7 @@
                                     {{ agg }}(decode(metadata$action, 'INSERT', {{ column }})) as {{ column }}
                                     {%- endif %} {{- ',' if not loop.last }}
                                     {%- endfor %}
+                                {%- endif %}
                                 ),
                                 sum(decode(metadata$action, 'INSERT', 1, -1)) as metadata$row_count
                             from
@@ -993,7 +999,7 @@
     {% endif %}
 
     {% if config.persist_relation_docs() %}
-        {% do custom_persist_docs(target_relation, model, 'table', 'Sync: ' ~ sync ~ '\nQuery Hash: ' ~ sql_hash) %}
+        {% do custom_persist_docs(target_relation, model, 'table', '\nSync: ' ~ sync ~ '\nQuery Hash: ' ~ sql_hash) %}
     {% endif %}
 
     {% do unset_query_tag(original_query_tag) %}
