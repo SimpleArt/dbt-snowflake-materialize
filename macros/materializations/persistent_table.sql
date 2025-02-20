@@ -199,7 +199,7 @@
                         left join
                             destination_counts
                                 {%- for column in all_keys %}
-                                {{ "on" if loop.first else "and" }} delta.{{ column }} is not distinct from source_counts.{{ column }}
+                                {{ "on" if loop.first else "and" }} delta.{{ column }} is not distinct from destination_counts.{{ column }}
                                 {%- endfor %}
                     )
 

@@ -54,21 +54,19 @@
     {% endset %}
 
     {% if execute %}
+        {% set rows = [] %}
+        {% set show_type = type %}
+        {% if type == 'function' %}
+            {% set show_type = 'user function' %}
+        {% endif %}
         {% if type is not none %}
-            {% set rows = [] %}
-            {% if type == 'function' %}
-                {% for row in run_query(show_relation(relation, 'user function')) if row['name'] == relation.identifier %}
-                    {% do rows.append(row) %}
-                {% endfor %}
-            {% else %}
-                {% for row in run_query(show_relation(relation, type)) if row['name'] == relation.identifier %}
-                    {% do rows.append(row) %}
-                {% endfor %}
-            {% endif %}
-            {% for row in rows if relation['name'] == relation.identifier %}
-                {{ return({'type': type, 'rows': rows}) }}
+            {% for row in run_query(show_relation(relation, show_type)) if row['name'] == relation.identifier %}
+                {% do rows.append(row) %}
             {% endfor %}
         {% endif %}
+        {% for row in rows if relation['name'] == relation.identifier %}
+            {{ return({'type': type, 'rows': rows}) }}
+        {% endfor %}
 
         {% set rows = run_query(query) %}
         {% for row in rows %}
