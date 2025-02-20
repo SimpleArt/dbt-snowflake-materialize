@@ -286,7 +286,7 @@
                     {{ temp_relation }} as source
                 inner join
                     {{ delta_keys_relation }} as delta
-                        on delta.{{ adapter.quote('PERSISTENT$SOURCE_ROW_COUNT') }} is not null
+                        on delta.{{ adapter.quote('persistent$source_row_count') }} is not null
                         {%- for column in incremental_keys %}
                         and source.{{ column }} is not distinct from delta.{{ column }}
                         {%- endfor %}
@@ -302,8 +302,9 @@
             using
                 {{ delta_keys_relation }} as source
             where
+                source.{{ adapter.quote('persistent$destination_row_count') }} is not null
                 {%- for column in incremental_keys %}
-                {{ "and " if not loop.first -}} destination.{{ column }} is not distinct from source.{{ column }}
+                and destination.{{ column }} is not distinct from source.{{ column }}
                 {%- endfor %}
         {% endcall %}
 
@@ -352,7 +353,7 @@
                             {{ target_relation }} as destination
                         inner join
                             {{ delta_keys_relation }} as delta
-                                on delta.{{ adapter.quote('persistent$destination_row_count') }} is not null
+                                on delta.{{ adapter.quote('persistent$source_row_count') }} is null
                                 {%- for column in incremental_keys %}
                                 and destination.{{ column }} is not distinct from delta.{{ column }}
                                 {%- endfor %}
