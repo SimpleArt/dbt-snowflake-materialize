@@ -101,152 +101,251 @@
 
     {% elif persist_strategy in ['delete+insert', 'merge'] %}
         {% set union_keys = array_union(all_keys, all_checksums) %}
+        {% set must_keys = all_keys %}
+        {% set is_must_unique = true %}
+        {% set is_union_unique = all_keys != [] %}
 
-        {% call statement('delta_keys') %}
-            create or replace temporary table {{ delta_keys_relation }} as
-                with
-                    source as (
-                        select
-                            {%- for column in union_keys %}
-                            {{ column }},
-                            {%- endfor %}
-                            count(*) as {{ adapter.quote('persistent$row_count') }}
-                        from
-                            {{ temp_relation }}
-                        group by
-                            all
-                    ),
+        {% if all_keys == [] %}
+            {% set must_keys = union_keys %}
+        {% endif %}
 
-                    destination as (
-                        select
-                            {%- for column in union_keys %}
-                            {{ column }},
-                            {%- endfor %}
-                            count(*) as {{ adapter.quote('persistent$row_count') }}
-                        from
-                            {{ target_relation }}
-                        group by
-                            all
-                    ),
-
-                    delta as (
-                        select
-                            {%- for column in union_keys %}
-                            ifnull(source.{{ column }}, destination.{{ column }}) as {{ column }},
-                            {%- endfor %}
-                            source.{{ adapter.quote('persistent$row_count') }} as {{ adapter.quote('persistent$source_row_count') }},
-                            destination.{{ adapter.quote('persistent$row_count') }} as {{ adapter.quote('persistent$destination_row_count') }}
-                        from
-                            source
-                        full outer join
-                            destination
-                                {%- for column in union_keys %}
-                                {{ "on" if loop.first else "and" }} source.{{ column }} is not distinct from destination.{{ column }}
-                                {%- endfor %}
-                        where
-                            source.{{ adapter.quote('persistent$row_count') }} is distinct from destination.{{ adapter.quote('persistent$row_count') }}
-                    ),
-
-                    {%- if all_keys == [] or persist_strategy == 'delete+insert' %}
-
-                    final as (
-                        select
-                            *,
-                            {{ adapter.quote('persistent$source_row_count') }} as {{ adapter.quote('persistent$source_key_count') }},
-                            {{ adapter.quote('persistent$destination_row_count') }} as {{ adapter.quote('persistent$destination_key_count') }}
-                        from
-                            delta
-                    )
-
-                    {%- else %}
-
-                    source_counts as (
-                        select
-                            {%- for column in all_keys %}
-                            {{ column }},
-                            {%- endfor %}
-                            sum({{ adapter.quote('persistent$row_count') }}) as {{ adapter.quote('persistent$row_count') }}
-                        from
-                            source
-                        group by
-                            all
-                    ),
-
-                    destination_counts as (
-                        select
-                            {%- for column in all_keys %}
-                            {{ column }},
-                            {%- endfor %}
-                            sum({{ adapter.quote('persistent$row_count') }}) as {{ adapter.quote('persistent$row_count') }}
-                        from
-                            destination
-                        group by
-                            all
-                    ),
-
-                    final as (
-                        select
-                            delta.*,
-                            source_counts.{{ adapter.quote('persistent$row_count') }} as {{ adapter.quote('persistent$source_key_count') }},
-                            destination_counts.{{ adapter.quote('persistent$row_count') }} as {{ adapter.quote('persistent$destination_key_count') }}
-                        from
-                            delta
-                        left join
-                            source_counts
-                                {%- for column in all_keys %}
-                                {{ "on" if loop.first else "and" }} delta.{{ column }} is not distinct from source_counts.{{ column }}
-                                {%- endfor %}
-                        left join
-                            destination_counts
-                                {%- for column in all_keys %}
-                                {{ "on" if loop.first else "and" }} delta.{{ column }} is not distinct from destination_counts.{{ column }}
-                                {%- endfor %}
-                    )
-
-                    {%- endif %}
-
-                select * from final
-        {% endcall %}
-
-        {% set stats_query %}
+        {% set check_must_unique %}
             select
-                zeroifnull(max({{ adapter.quote('persistent$source_row_count') }})) as source_row_count,
-                zeroifnull(max({{ adapter.quote('persistent$source_key_count') }})) as source_key_count,
-                zeroifnull(max({{ adapter.quote('persistent$destination_row_count') }})) as destination_row_count,
-                zeroifnull(max({{ adapter.quote('persistent$destination_key_count') }})) as destination_key_count,
-                zeroifnull(sum({{ adapter.quote('persistent$source_row_count') }})) as inserts,
-                zeroifnull(sum({{ adapter.quote('persistent$destination_row_count') }})) as deletes
+                count(*) as row_count,
+                count(distinct hash({{ must_keys | join(', ') }})) as distinct_count
             from
-                {{ delta_keys_relation }}
+                {{ target_relation }}
         {% endset %}
 
-        {% set incremental_keys = union_keys %}
+        {% set row = run_query(check_must_unique)[0] %}
 
-        {% if persist_strategy == 'merge' %}
-            {% set row = run_query(stats_query)[0] %}
+        {% if row['ROW_COUNT'] != row['DISTINCT_COUNT'] %}
+            {% set is_must_unique = false %}
+        {% endif %}
 
-            {% if row['DELETES'] == 0 %}
-                {% set persist_strategy = 'insert_only' %}
-            {% elif row['INSERTS'] == 0 %}
-                {% set persist_strategy = 'delete_only' %}
-            {% elif row['SOURCE_ROW_COUNT'] > 1 or row['DESTINATION_ROW_COUNT'] > 1 %}
-                {% set persist_strategy = 'delete+insert' %}
-            {% elif all_keys != [] and row['SOURCE_KEY_COUNT'] <= 1 and row['DESTINATION_KEY_COUNT'] <= 1 %}
-                {% set incremental_keys = all_keys %}
+        {% set check_union_unique %}
+            select
+                count(*) as row_count,
+                count(distinct hash({{ union_keys | join(', ') }})) as distinct_count
+            from
+                {{ target_relation }}
+        {% endset %}
 
-                {% call statement('delta_keys_aggregated') %}
-                    create or replace temporary table {{ delta_keys_relation }} as
-                        select
-                            {%- for column in all_keys %}
-                            {{ column }},
+        {% if not is_must_unique and is_union_unique %}
+            {% set row = run_query(check_union_unique)[0] %}
+            {% if row['ROW_COUNT'] != row['DISTINCT_COUNT'] %}
+                {% set is_union_unique = false %}
+            {% endif %}
+        {% endif %}
+
+        {% set check_must_unique %}
+            select
+                count(*) as row_count,
+                count(distinct hash({{ must_keys | join(', ') }})) as distinct_count
+            from
+                {{ temp_relation }}
+        {% endset %}
+
+        {% if is_must_unique %}
+            {% set row = run_query(check_must_unique)[0] %}
+            {% if row['ROW_COUNT'] != row['DISTINCT_COUNT'] %}
+                {% set is_must_unique = false %}
+            {% endif %}
+        {% endif %}
+
+        {% set check_union_unique %}
+            select
+                count(*) as row_count,
+                count(distinct hash({{ union_keys | join(', ') }})) as distinct_count
+            from
+                {{ temp_relation }}
+        {% endset %}
+
+        {% if not is_must_unique and is_union_unique %}
+            {% set row = run_query(check_union_unique)[0] %}
+            {% if row['ROW_COUNT'] != row['DISTINCT_COUNT'] %}
+                {% set is_union_unique = false %}
+            {% endif %}
+        {% endif %}
+
+        {% if is_must_unique %}
+            {% set incremental_keys = must_keys %}
+        {% else %}
+            {% set incremental_keys = union_keys %}
+        {% endif %}
+
+        {% if is_must_unique or is_union_unique %}
+            {% call statement('delta_keys') %}
+                create or replace temporary table {{ delta_keys_relation }} as
+                    with
+                        source as (select *, 1 as {{ adapter.quote('persistent$source_row_count') }} from {{ temp_relation }}),
+                        destination as (select *, 1 as {{ adapter.quote('persistent$destination_row_count') }} from {{ target_relation }})
+
+                    select
+                        {%- for column in incremental_keys %}
+                        ifnull(source.{{ column }}, destination.{{ column }}) as {{ column }},
+                        {%- endfor %}
+                        {{ adapter.quote('persistent$source_row_count') }},
+                        {{ adapter.quote('persistent$destination_row_count') }}
+                    from
+                        source
+                    full outer join
+                        destination
+                            {%- for column in incremental_keys %}
+                            {{ "on " if loop.first else "and " -}}
+                            source.{{ column }} is not distinct from destination.{{ column }}
                             {%- endfor %}
-                            sum({{ adapter.quote('persistent$source_row_count') }}) as {{ adapter.quote('persistent$source_row_count') }},
-                            sum({{ adapter.quote('persistent$destination_row_count') }}) as {{ adapter.quote('persistent$destination_row_count') }}
-                        from
-                            {{ delta_keys_relation }}
-                        group by
-                            all
-                {% endcall %}
+                    where
+                        source.{{ adapter.quote('persistent$source_row_count') }} is distinct from destination.{{ adapter.quote('persistent$destination_row_count') }}
+                        {%- for column in all_checksums %}
+                        or source.{{ column }} is distinct from destination.{{ column }}
+                        {%- endfor %}
+            {% endcall %}
+        {% else %}
+            {% call statement('delta_keys') %}
+                create or replace temporary table {{ delta_keys_relation }} as
+                    with
+                        source as (
+                            select
+                                {%- for column in union_keys %}
+                                {{ column }},
+                                {%- endfor %}
+                                count(*) as {{ adapter.quote('persistent$row_count') }}
+                            from
+                                {{ temp_relation }}
+                            group by
+                                all
+                        ),
+
+                        destination as (
+                            select
+                                {%- for column in union_keys %}
+                                {{ column }},
+                                {%- endfor %}
+                                count(*) as {{ adapter.quote('persistent$row_count') }}
+                            from
+                                {{ target_relation }}
+                            group by
+                                all
+                        ),
+
+                        delta as (
+                            select
+                                {%- for column in union_keys %}
+                                ifnull(source.{{ column }}, destination.{{ column }}) as {{ column }},
+                                {%- endfor %}
+                                source.{{ adapter.quote('persistent$row_count') }} as {{ adapter.quote('persistent$source_row_count') }},
+                                destination.{{ adapter.quote('persistent$row_count') }} as {{ adapter.quote('persistent$destination_row_count') }}
+                            from
+                                source
+                            full outer join
+                                destination
+                                    {%- for column in union_keys %}
+                                    {{ "on" if loop.first else "and" }} source.{{ column }} is not distinct from destination.{{ column }}
+                                    {%- endfor %}
+                            where
+                                source.{{ adapter.quote('persistent$row_count') }} is distinct from destination.{{ adapter.quote('persistent$row_count') }}
+                        ),
+
+                        {%- if all_keys == [] or persist_strategy == 'delete+insert' %}
+
+                        final as (
+                            select
+                                *,
+                                {{ adapter.quote('persistent$source_row_count') }} as {{ adapter.quote('persistent$source_key_count') }},
+                                {{ adapter.quote('persistent$destination_row_count') }} as {{ adapter.quote('persistent$destination_key_count') }}
+                            from
+                                delta
+                        )
+
+                        {%- else %}
+
+                        source_counts as (
+                            select
+                                {%- for column in all_keys %}
+                                {{ column }},
+                                {%- endfor %}
+                                sum({{ adapter.quote('persistent$row_count') }}) as {{ adapter.quote('persistent$row_count') }}
+                            from
+                                source
+                            group by
+                                all
+                        ),
+
+                        destination_counts as (
+                            select
+                                {%- for column in all_keys %}
+                                {{ column }},
+                                {%- endfor %}
+                                sum({{ adapter.quote('persistent$row_count') }}) as {{ adapter.quote('persistent$row_count') }}
+                            from
+                                destination
+                            group by
+                                all
+                        ),
+
+                        final as (
+                            select
+                                delta.*,
+                                source_counts.{{ adapter.quote('persistent$row_count') }} as {{ adapter.quote('persistent$source_key_count') }},
+                                destination_counts.{{ adapter.quote('persistent$row_count') }} as {{ adapter.quote('persistent$destination_key_count') }}
+                            from
+                                delta
+                            left join
+                                source_counts
+                                    {%- for column in all_keys %}
+                                    {{ "on" if loop.first else "and" }} delta.{{ column }} is not distinct from source_counts.{{ column }}
+                                    {%- endfor %}
+                            left join
+                                destination_counts
+                                    {%- for column in all_keys %}
+                                    {{ "on" if loop.first else "and" }} delta.{{ column }} is not distinct from destination_counts.{{ column }}
+                                    {%- endfor %}
+                        )
+
+                        {%- endif %}
+
+                    select * from final
+            {% endcall %}
+
+            {% set stats_query %}
+                select
+                    zeroifnull(max({{ adapter.quote('persistent$source_row_count') }})) as source_row_count,
+                    zeroifnull(max({{ adapter.quote('persistent$source_key_count') }})) as source_key_count,
+                    zeroifnull(max({{ adapter.quote('persistent$destination_row_count') }})) as destination_row_count,
+                    zeroifnull(max({{ adapter.quote('persistent$destination_key_count') }})) as destination_key_count,
+                    zeroifnull(sum({{ adapter.quote('persistent$source_row_count') }})) as inserts,
+                    zeroifnull(sum({{ adapter.quote('persistent$destination_row_count') }})) as deletes
+                from
+                    {{ delta_keys_relation }}
+            {% endset %}
+
+            {% if persist_strategy == 'merge' %}
+                {% set row = run_query(stats_query)[0] %}
+
+                {% if row['DELETES'] == 0 %}
+                    {% set persist_strategy = 'insert_only' %}
+                {% elif row['INSERTS'] == 0 %}
+                    {% set persist_strategy = 'delete_only' %}
+                {% elif row['SOURCE_ROW_COUNT'] > 1 or row['DESTINATION_ROW_COUNT'] > 1 %}
+                    {% set persist_strategy = 'delete+insert' %}
+                {% elif all_keys != [] and row['SOURCE_KEY_COUNT'] <= 1 and row['DESTINATION_KEY_COUNT'] <= 1 %}
+                    {% set incremental_keys = all_keys %}
+
+                    {% call statement('delta_keys_aggregated') %}
+                        create or replace temporary table {{ delta_keys_relation }} as
+                            select
+                                {%- for column in all_keys %}
+                                {{ column }},
+                                {%- endfor %}
+                                sum({{ adapter.quote('persistent$source_row_count') }}) as {{ adapter.quote('persistent$source_row_count') }},
+                                sum({{ adapter.quote('persistent$destination_row_count') }}) as {{ adapter.quote('persistent$destination_row_count') }}
+                            from
+                                {{ delta_keys_relation }}
+                            group by
+                                all
+                    {% endcall %}
+                {% endif %}
             {% endif %}
         {% endif %}
 
