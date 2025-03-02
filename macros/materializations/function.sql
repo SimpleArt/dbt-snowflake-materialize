@@ -27,7 +27,7 @@
         ~ local_md5(sql)
     ) %}
 
-    {% set DDL = drop_relation(target_relation, 'function', ['Aggregate: ' ~ aggregate, 'Query Hash: ' ~ sql_hash]) %}
+    {% set DDL = drop_relation_unless(target_relation, 'function', ['Aggregate: ' ~ aggregate, 'Query Hash: ' ~ sql_hash]) %}
 
     {% if should_full_refresh() %}
         {% set DDL = 'create or replace' %}
@@ -41,22 +41,6 @@
 
     --------------------------------------------------------------------------------------------------------------------
     -- build model
-
-    {% set create_if_not_exists %}
-        {{ sql_header if sql_header is not none }}
-
-        create {{- " secure" if secure }} {{- " aggregate" if aggregate }} function if not exists {{ target_relation }}({{ parameters }})
-            returns {{ returns }}
-            {%- if language is not none %}
-            {%- for language_name, language_configs in language.items() %}
-            language {{ language_name }}
-            {%- for language_config in language_configs %}
-            {{ language_config }}
-            {%- endfor %}
-            {%- endfor %}
-            {%- endif %}
-        as $${{ sql }}$$
-    {% endset %}
 
     {% set create_or_replace %}
         {{ sql_header if sql_header is not none }}
@@ -76,32 +60,30 @@
     {% endset %}
 
     {% if DDL == 'create if not exists' %}
-        {% if secure is not none and secure %}
+        {% call statement('main') %}
+            select 'already exists' as status
+        {% endcall %}
+
+        {% if secure %}
             {% call statement('set_secure') %}
                 alter function {{ target_relation }}{{ arguments }} set secure
             {% endcall %}
-        {% endif %}
-
-        {% call statement('main') %}
-            {{- sql_run_safe(create_if_not_exists) -}}
-        {% endcall %}
-
-        {% if secure is not none and not secure %}
+        {% elif secure is not none %}
             {% call statement('unset_secure') %}
                 alter function {{ target_relation }}{{ arguments }} unset secure
             {% endcall %}
         {% endif %}
 
     {% else %}
-        {% set success = run_query(sql_try_except(create_or_replace))[0]['SUCCESS'] %}
+        {% set status = run_query(sql_try_except(create_or_replace))[0]['STATUS'] %}
 
-        {% if success %}
+        {% if status == 'success' %}
             {% call statement('main') %}
-                {{- sql_run_safe(create_if_not_exists) -}}
+                select 'success' as status
             {% endcall %}
 
         {% else %}
-            {% do drop_relation(target_relation, 'table', ['Aggregate: ' ~ aggregate, 'Query Hash: ' ~ sql_hash]) %}
+            {% do drop_relation_unless(target_relation, 'table', ['Aggregate: ' ~ aggregate, 'Query Hash: ' ~ sql_hash]) %}
 
             {% call statement('main') %}
                 {{- sql_run_safe(create_or_replace) -}}
@@ -128,7 +110,7 @@
     {% endif %}
 
     {% if config.persist_relation_docs() %}
-        {% do custom_persist_docs(target_relation, model, 'function', 'Aggregate: ' ~ aggregate ~ '\nQuery Hash: ' ~ sql_hash, arguments) %}
+        {% do custom_persist_docs(target_relation, model, 'function', '\nAggregate: ' ~ aggregate ~ '\nQuery Hash: ' ~ sql_hash, arguments) %}
     {% endif %}
 
     {% if overload_version is boolean and overload_version %}
@@ -167,23 +149,7 @@
             path={'identifier': overload_identifier}
         ) %}
 
-        {% set DDL = drop_relation(overload_relation, 'function', ['Query Hash: ' ~ sql_hash]) %}
-
-        {% set create_if_not_exists %}
-            {{ sql_header if sql_header is not none }}
-
-            create {{- " secure" if secure }} {{- " aggregate" if aggregate }} function if not exists {{ overload_relation }}({{ parameters }})
-                returns {{ returns }}
-                {%- if language is not none %}
-                {%- for language_name, language_configs in language.items() %}
-                language {{ language_name }}
-                {%- for language_config in language_configs %}
-                {{ language_config }}
-                {%- endfor %}
-                {%- endfor %}
-                {%- endif %}
-            as $${{ sql }}$$
-        {% endset %}
+        {% set DDL = drop_relation_unless(overload_relation, 'function', ['Aggregate: ' ~ aggregate, 'Query Hash: ' ~ sql_hash]) %}
 
         {% set create_or_replace %}
             {{ sql_header if sql_header is not none }}
@@ -202,25 +168,21 @@
         {% endset %}
 
         {% if DDL == 'create if not exists' %}
-            {% if secure is not none and secure %}
+            {% if secure %}
                 {% call statement('set_secure') %}
                     alter function {{ overload_relation }}{{ arguments }} set secure
                 {% endcall %}
-            {% endif %}
-
-            {% do run_query(sql_run_safe(create_if_not_exists)) %}
-
-            {% if secure is not none and not secure %}
+            {% elif secure is not none %}
                 {% call statement('unset_secure') %}
                     alter function {{ overload_relation }}{{ arguments }} unset secure
                 {% endcall %}
             {% endif %}
 
         {% else %}
-            {% set success = run_query(sql_try_except(create_or_replace))[0]['STATUS'] %}
+            {% set statue = run_query(sql_try_except(create_or_replace))[0]['STATUS'] %}
 
-            {% if not success %}
-                {% do drop_relation(overload_relation, 'table', ['Aggregate: ' ~ aggregate, 'Query Hash: ' ~ sql_hash]) %}
+            {% if status != 'success' %}
+                {% do drop_relation_unless(overload_relation, 'table', ['Aggregate: ' ~ aggregate, 'Query Hash: ' ~ sql_hash]) %}
                 {% do run_query(create_or_replace) %}
             {% endif %}
 
@@ -235,7 +197,7 @@
         {% endif %}
 
         {% if config.persist_relation_docs() %}
-            {% do custom_persist_docs(overload_relation, model, 'function', 'Aggregate: ' ~ aggregate ~ '\nQuery Hash: ' ~ sql_hash, arguments) %}
+            {% do custom_persist_docs(overload_relation, model, 'function', '\nAggregate: ' ~ aggregate ~ '\nQuery Hash: ' ~ sql_hash, arguments) %}
         {% endif %}
 
     {% endif %}

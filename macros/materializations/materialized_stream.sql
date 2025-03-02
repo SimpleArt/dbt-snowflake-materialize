@@ -3,7 +3,7 @@
     {% set sql_header = config.get('sql_header') %}
 
     {% set transient = config.get('transient', false) %}
-    {% set change_tracking = config.get('change_tracking', true) %}
+    {% set change_tracking = config.get('change_tracking') %}
     {% set copy_grants = config.get('copy_grants', false) %}
     {% set cluster_by = config.get('cluster_by') %}
     {% set on_schema_change = config.get('on_schema_change', 'evolve_schema') %}
@@ -119,7 +119,7 @@
         {% set comment = row.get('comment', row.get('description', '')) %}
 
         {% if state == {} %}
-            {% set DDL = drop_relation(target_relation, 'table') %}
+            {% set DDL = drop_relation_unless(target_relation, 'table') %}
         {% elif ('Query Hash: ' ~ sql_hash) not in comment %}
             {% set DDL = 'create or replace' %}
         {% elif transient and row.get('kind') != 'TRANSIENT' %}
@@ -141,7 +141,7 @@
     {% else %}
         {% set sync = '' %}
         {% set sql_hash = '' %}
-        {% set DDL = drop_relation(target_relation, 'table', none, transient) %}
+        {% set DDL = drop_relation_unless(target_relation, 'table', none, transient) %}
         {% set prefix = '' %}
     {% endif %}
 
@@ -226,6 +226,7 @@
                                     metadata$action,
                                     metadata$isupdate,
                                     metadata$row_id
+                                {%- if aggregate %}
                                 ) replace (
                                     {%- for column, agg in aggregate %}
                                     {%- if agg == 'sum' %}
@@ -234,6 +235,7 @@
                                     {{ agg }}(decode(metadata$action, 'INSERT', {{ column }})) as {{ column }}
                                     {%- endif %} {{- ',' if not loop.last }}
                                     {%- endfor %}
+                                {%- endif %}
                                 ),
                                 sum(decode(metadata$action, 'INSERT', 1, -1)) as metadata$row_count
                             from
@@ -285,6 +287,7 @@
                                     metadata$action,
                                     metadata$isupdate,
                                     metadata$row_id
+                                {%- if aggregate %}
                                 ) replace (
                                     {%- for column, agg in aggregate if agg != 'count_agg' %}
                                     {%- if agg == 'sum' %}
@@ -293,6 +296,7 @@
                                     {{ agg }}(decode(metadata$action, 'INSERT', {{ column }})) as {{ column }}
                                     {%- endif %} {{- ',' if not loop.last }}
                                     {%- endfor %}
+                                {%- endif %}
                                 ),
                                 sum(decode(metadata$action, 'INSERT', 1, -1)) as metadata$row_count
                             from
@@ -337,6 +341,7 @@
                                     metadata$action,
                                     metadata$isupdate,
                                     metadata$row_id
+                                {%- if aggregate %}
                                 ) replace (
                                     {%- for column, agg in aggregate if agg != 'count_agg' %}
                                     {%- if agg == 'sum' %}
@@ -345,6 +350,7 @@
                                     {{ agg }}(decode(metadata$action, 'INSERT', {{ column }})) as {{ column }}
                                     {%- endif %} {{- ',' if not loop.last }}
                                     {%- endfor %}
+                                {%- endif %}
                                 ),
                                 sum(decode(metadata$action, 'INSERT', 1, -1)) as metadata$row_count
                             from
@@ -699,17 +705,10 @@
     {% endif %}
 
     {% if DDL == 'create if not exists' %}
-        {% if not change_tracking %}
+        {% if change_tracking is not none and not change_tracking %}
             {% call statement('unset_change_tracking') %}
                 alter table if exists {{ target_relation }} set
                     change_tracking = false
-            {% endcall %}
-        {% endif %}
-
-        {% if cluster_by is none %}
-            {% call statement('drop_cluster_by') %}
-                alter table if exists {{ target_relation }}
-                    drop clustering key
             {% endcall %}
         {% endif %}
     {% endif %}
@@ -993,7 +992,7 @@
     {% endif %}
 
     {% if config.persist_relation_docs() %}
-        {% do custom_persist_docs(target_relation, model, 'table', 'Sync: ' ~ sync ~ '\nQuery Hash: ' ~ sql_hash) %}
+        {% do custom_persist_docs(target_relation, model, 'table', '\nSync: ' ~ sync ~ '\nQuery Hash: ' ~ sql_hash) %}
     {% endif %}
 
     {% do unset_query_tag(original_query_tag) %}

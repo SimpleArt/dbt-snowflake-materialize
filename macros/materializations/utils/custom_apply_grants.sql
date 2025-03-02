@@ -1,6 +1,6 @@
 {% macro custom_apply_grants(relation, grants, type=none, arguments=none) %}
 
-    {% if not execute or grants is none %}
+    {% if not execute or not grants %}
         {{ return(none) }}
     {% endif %}
 

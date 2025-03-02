@@ -10,7 +10,7 @@
 
     {% set sql_hash = local_md5(sql) %}
 
-    {% set DDL = drop_relation(target_relation, 'materialized view', ['Query Hash: ' ~ sql_hash]) %}
+    {% set DDL = drop_relation_unless(target_relation, 'materialized view', ['Query Hash: ' ~ sql_hash]) %}
 
     {% if should_full_refresh() %}
         {% set DDL = 'create or replace' %}
@@ -28,8 +28,8 @@
 
         {% if cluster_by is none %}
             {% call statement('set_clustering_key') %}
-                alter table if exists {{ target_relation }}
-                    cluster by ({{ cluster_by | join(', ') }})
+                alter materialized view {{ target_relation }}
+                    drop clustering keys
             {% endcall %}
         {% endif %}
 
@@ -46,18 +46,18 @@
 
         {% if secure %}
             {% call statement('set_secure') %}
-                alter view {{ target_relation }} set secure
+                alter materialized view {{ target_relation }} set secure
             {% endcall %}
-        {% else %}
+        {% elif secure is not none %}
             {% call statement('unset_secure') %}
-                alter view {{ target_relation }} unset secure
+                alter materialized view {{ target_relation }} unset secure
             {% endcall %}
         {% endif %}
 
         {% if cluster_by is not none %}
             {% call statement('drop_clustering_key') %}
-                alter materialized view if exists {{ target_relation }}
-                    drop clustering key
+                alter materialized view {{ target_relation }}
+                    cluster by ({{ cluster_by | join(', ') }})
             {% endcall %}
         {% endif %}
 
@@ -90,7 +90,7 @@
     {% endif %}
 
     {% if config.persist_relation_docs() %}
-        {% do custom_persist_docs(target_relation, model, 'materialized view', 'Query Hash: ' ~ sql_hash) %}
+        {% do custom_persist_docs(target_relation, model, 'materialized view') %}
     {% endif %}
 
     {% do unset_query_tag(original_query_tag) %}

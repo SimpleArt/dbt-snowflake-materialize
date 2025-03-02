@@ -50,7 +50,7 @@
         {% endif %}
 
         {% if state == {} %}
-            {% set DDL = drop_relation(target_relation, 'table') %}
+            {% set DDL = drop_relation_unless(target_relation, 'table') %}
         {% elif ('Function Hash: ' ~ sql_hash) not in comment %}
             {% set DDL = 'create or replace' %}
         {% elif transient and row.get('IS_TRANSIENT') != 'YES' %}
@@ -61,7 +61,7 @@
             {% set DDL = 'create if not exists' %}
         {% endif %}
     {% else %}
-        {% set DDL = drop_relation(target_relation, 'table', ['Function Hash: ' ~ sql_hash], transient) %}
+        {% set DDL = drop_relation_unless(target_relation, 'table', ['Function Hash: ' ~ sql_hash], transient) %}
         {% set prefix = '' %}
     {% endif %}
 
@@ -140,6 +140,11 @@
                 select * from {{ sample_relation }}
         {% endcall %}
 
+        {% call statement('save_metadata') %}
+            alter table {{ target_relation }} set
+                comment = $${{ prefix }}Function Hash: {{ sql_hash }}$$
+        {% endcall %}
+
     {% else %}
 
         {% call statement('main') %}
@@ -212,11 +217,6 @@
         {% endfor %}
     {% endif %}
 
-    {% call statement('save_metadata') %}
-        alter table {{ target_relation }} set
-            comment = $${{ prefix }}Function Hash: {{ sql_hash }}$$
-    {% endcall %}
-
     {% if change_tracking %}
         {% call statement('set_change_tracking') %}
             alter table if exists {{ target_relation }} set
@@ -235,7 +235,7 @@
     {% endif %}
 
     {% if config.persist_relation_docs() %}
-        {% do custom_persist_docs(target_relation, model, 'table', 'Sync: ' ~ sync ~ '\nQuery Hash: ' ~ sql_hash) %}
+        {% do custom_persist_docs(target_relation, model, 'table', '\nFunction Hash: ' ~ sql_hash) %}
     {% endif %}
 
     {% do unset_query_tag(original_query_tag) %}

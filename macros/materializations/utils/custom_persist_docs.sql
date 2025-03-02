@@ -18,7 +18,7 @@
 
         {% if model.description %}
             {% call statement('comment_relation') %}
-                alter {{ type }} {{ relation }} {{- arguments if arguments is not none }} set comment = $${{ model.description }} {{- '\n' ~ metadata if metadata is not none }}$$
+                alter {{ type }} {{ relation }} {{- arguments if arguments is not none }} set comment = $${{ model.description }} {{- metadata if metadata is not none }}$$
             {% endcall %}
         {% endif %}
     {% endif %}
