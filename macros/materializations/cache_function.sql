@@ -188,7 +188,7 @@
         {% for i in range(0, row_count, batch_size) %}
             {% call statement('create_sample') %}
                 create or replace temporary table {{ sample_relation }} as
-                    select * exclude "metadata$row_index" from {{ temp_relation }} where {{ i }} < "metadata$row_index" <= {{ i + batch_size }}
+                    select * exclude "metadata$row_index" from {{ temp_relation }} where "metadata$row_index" between {{ i + 1 }} and {{ i + batch_size }}
             {% endcall %}
 
             {% call statement('call_sample') %}
