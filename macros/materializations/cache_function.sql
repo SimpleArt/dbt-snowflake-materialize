@@ -53,9 +53,9 @@
             {% set DDL = drop_relation_unless(target_relation, 'table') %}
         {% elif ('Function Hash: ' ~ sql_hash) not in comment %}
             {% set DDL = 'create or replace' %}
-        {% elif transient and row.get('IS_TRANSIENT') != 'YES' %}
+        {% elif transient and row.get('KIND') != 'TRANSIENT' %}
             {% set DDL = 'create or replace' %}
-        {% elif not transient and row.get('IS_TRANSIENT') != 'NO' %}
+        {% elif not transient and row.get('KING') == 'TRANSIENT' %}
             {% set DDL = 'create or replace' %}
         {% else %}
             {% set DDL = 'create if not exists' %}
