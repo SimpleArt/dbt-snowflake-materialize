@@ -11,7 +11,7 @@ with run_query as procedure()
     handler = 'run_query'
 as $$
 def run_query(session):
-    return session.sql(f"""{{ f_string_sql(query) }}""")
+    return session.sql("{{ escape_py_string(query) }}")
 $$
 
 call run_query()

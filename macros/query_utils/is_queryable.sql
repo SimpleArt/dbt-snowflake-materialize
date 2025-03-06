@@ -20,7 +20,7 @@ with is_queryable as procedure()
 as $$
 def is_queryable(session):
     try:
-        session.sql(f"""explain {{ f_string_sql(sql) }}""").collect()
+        session.sql("explain {{ escape_py_string(sql) }}").collect()
     except:
         return session.sql("select false as result")
     else:

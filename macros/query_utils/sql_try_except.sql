@@ -8,7 +8,7 @@ with try_query as procedure()
 as $$
 def try_query(session):
     try:
-        session.sql(f"""{{ f_string_sql(query) }}""").collect()
+        session.sql("{{ escape_py_string(query) }}").collect()
     except:
         return session.sql("select 'failure' as status")
     else:
