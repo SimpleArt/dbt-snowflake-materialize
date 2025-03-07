@@ -13,9 +13,9 @@ with get_schema as procedure()
     handler = 'get_schema'
 as $$
 def get_schema(session):
-    columns = session.sql("{{ escape_py_string(sql) }}").columns
+    columns = session.sql("""{{ escape_py_string(sql) }}""").columns
     quoted = ", ".join(columns)
-    return session.sql(f"select \\x24\\x24{quoted}\\x24\\x24 as columns")
+    return session.sql(f"select \x24\x24{quoted}\x24\x24 as columns")
 $$
 
 call get_schema()
