@@ -16,7 +16,7 @@
 
     {% elif type in ['function', 'procedure'] %}
         {# If a function/procedure needs to be created, first check if it's already created. #}
-        {% if type == drop_unless_type %}
+        {% if type == drop_unless_type and not should_full_refresh() %}
             {% for row in rows %}
                 {% set comment = row.get('comment', row.get('description', '')) %}
                 {% set state = {'flag': true} %}
@@ -50,7 +50,7 @@
 
         {{ return('create or replace') }}
 
-    {% elif type != drop_unless_type %}
+    {% elif type != drop_unless_type or should_full_refresh() %}
         {# If the object exists of the wrong type, then drop it. #}
         {% call statement('drop_object') %}
             drop {{ type }} if exists {{ relation }}
