@@ -50,10 +50,6 @@
 
     {% set DDL = drop_relation_unless(target_relation, 'table', none, transient) %}
 
-    {% if should_full_refresh() %}
-        {% set DDL = 'create or replace' %}
-    {% endif %}
-
     -- setup
     {{ run_hooks(pre_hooks, inside_transaction=false) }}
 
