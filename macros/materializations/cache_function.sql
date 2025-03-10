@@ -195,9 +195,7 @@
                 on
                     1 = 1
                     {%- for column in temp_columns %}
-                    {%- if not loop.last %}
                     and destination.{{ adapter.quote(column.name) }} is not distinct from source.{{ adapter.quote(column.name) }}
-                    {%- endif %}
                     {%- endfor %}
                 when not matched then
                     insert (
