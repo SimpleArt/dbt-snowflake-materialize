@@ -122,101 +122,103 @@
 
     --------------------------------------------------------------------------------------------------------------------
     -- build model
-    {% if DDL == 'create or replace' %}
-
-        {% call statement('main') %}
-            create or replace {{- ' transient' if transient }} table {{ target_relation }}
-                {%- if cluster_by is not none %}
-                cluster by ({{ cluster_by | join(', ') }})
-                {%- endif %}
-                {%- if copy_grants %}
-                copy grants
-                {%- endif %}
-            as
-                select * from {{ sample_relation }}
-        {% endcall %}
-
-        {% call statement('save_metadata') %}
-            alter table {{ target_relation }} set
-                comment = $${{ prefix }}Function Hash: {{ sql_hash }}$$
-        {% endcall %}
-
-    {% else %}
-
-        {% call statement('main') %}
-            insert into {{ target_relation }}
-                select * from {{ sample_relation }}
-        {% endcall %}
-
-    {% endif %}
-
-    {% call statement('filter_temp_relation') %}
-        create or replace temporary table {{ temp_relation }} as
-            select
-                *,
-                row_number() over (order by null) as "metadata$row_index"
-            from
-                (
-                    select * from {{ temp_relation }}
-
-                    minus
-
-                    select
-                        {%- for column in temp_columns %}
-                        {{ adapter.quote(column.name) }},
-                        {%- endfor %}
-                    from
-                        {{ target_relation }}
-
-                    {%- if load_limit is not none %}
-
-                    limit
-                        {{ load_limit }}
+    {% set main_query %}
+        with cache_all as procedure()
+            returns table("number of rows inserted" int)
+        as $$
+            begin
+                {%- if DDL == 'create or replace' %}
+                create or replace {{- ' transient' if transient }} table {{ target_relation }}
+                    {%- if cluster_by is not none %}
+                    cluster by ({{ cluster_by | join(', ') }})
                     {%- endif %}
-                )
-            order by
-                "metadata$row_index"
+                    {%- if copy_grants %}
+                    copy grants
+                    {%- endif %}
+                as
+                    select * from {{ sample_relation }};
+
+                alter table {{ target_relation }} set
+                    comment = $${{ prefix }}Function Hash: {{ sql_hash }}$$;
+                {% endif %}
+                create or replace temporary table {{ temp_relation }} as
+                    select
+                        *,
+                        row_number() over (order by null) as "metadata$row_index"
+                    from
+                        (
+                            select * from {{ temp_relation }}
+
+                            minus
+
+                            select
+                                {%- for column in temp_columns %}
+                                {{ adapter.quote(column.name) }},
+                                {%- endfor %}
+                            from
+                                {{ target_relation }}
+
+                            {%- if load_limit is not none %}
+
+                            limit
+                                {{ load_limit }}
+                            {%- endif %}
+                        )
+                    order by
+                        "metadata$row_index";
+
+                let res resultset := (select count(*) as "number of rows inserted" from {{ temp_relation }});
+
+                while (exists(select * from {{ temp_relation }})) do
+                    create or replace temporary table {{ sample_relation }} as
+                        select *
+                        from {{ temp_relation }}
+                        order by "metadata$row_index"
+                        limit {{ batch_size }};
+
+                    delete from {{ temp_relation }} as remainder
+                    using {{ sample_relation }} as removed
+                    where remainder."metadata$row_index" = removed."metadata$row_index";
+
+                    merge into
+                        {{ target_relation }} as destination
+                    using
+                        (select *, {{ function }} from (select * exclude "metadata$row_index" from {{ sample_relation }})) as source
+                    on
+                        1 = 1
+                        {%- for column in temp_columns %}
+                        and destination.{{ adapter.quote(column.name) }} is not distinct from source.{{ adapter.quote(column.name) }}
+                        {%- endfor %}
+                    when not matched then
+                        insert (
+                            {%- for column in sample_columns %}
+                            {{ adapter.quote(column.name) }} {{- ',' if not loop.last }}
+                            {%- endfor %}
+                        ) values (
+                            {%- for column in sample_columns %}
+                            source.{{ adapter.quote(column.name) }} {{- ',' if not loop.last }}
+                            {%- endfor %}
+                        );
+                end while;
+
+                drop table if exists {{ sample_relation }};
+                drop table if exists {{ sample_relation }};
+                drop table if exists {{ sample_relation }};
+
+                {%- if change_tracking %}
+
+                alter table if exists {{ target_relation }} set
+                    change_tracking = true;
+                {%- endif %}
+            end
+        $$
+
+        call cache_all()
+    {% endset %}
+
+    {% call statement('main') %}
+        {{- sql_run_safe(main_query) -}}
     {% endcall %}
-
-    {% if execute %}
-        {% set row_count = run_query('select count(*) as row_count from ' ~ temp_relation)[0]['ROW_COUNT'] %}
-
-        {% for i in range(0, row_count, batch_size) %}
-            {% call statement('create_sample') %}
-                create or replace temporary table {{ sample_relation }} as
-                    select * exclude "metadata$row_index" from {{ temp_relation }} where "metadata$row_index" between {{ i + 1 }} and {{ i + batch_size }}
-            {% endcall %}
-
-            {% call statement('call_sample') %}
-                merge into
-                    {{ target_relation }} as destination
-                using
-                    (select *, {{ function }} from {{ sample_relation }}) as source
-                on
-                    1 = 1
-                    {%- for column in temp_columns %}
-                    and destination.{{ adapter.quote(column.name) }} is not distinct from source.{{ adapter.quote(column.name) }}
-                    {%- endfor %}
-                when not matched then
-                    insert (
-                        {%- for column in sample_columns %}
-                        {{ adapter.quote(column.name) }} {{- ',' if not loop.last }}
-                        {%- endfor %}
-                    ) values (
-                        {%- for column in sample_columns %}
-                        source.{{ adapter.quote(column.name) }} {{- ',' if not loop.last }}
-                        {%- endfor %}
-                    )
-            {% endcall %}
-        {% endfor %}
-    {% endif %}
-
-    {% if change_tracking %}
-        {% call statement('set_change_tracking') %}
-            alter table if exists {{ target_relation }} set
-                change_tracking = true
-        {% endcall %}
-    {% endif %}
 
     {{ run_hooks(post_hooks, inside_transaction=True) }}
 
