@@ -210,6 +210,8 @@
                 alter table if exists {{ target_relation }} set
                     change_tracking = true;
                 {%- endif %}
+
+                return table(res);
             end
         $$
 
