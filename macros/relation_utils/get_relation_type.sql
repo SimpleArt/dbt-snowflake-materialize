@@ -64,7 +64,7 @@
                 {% do rows.append(row) %}
             {% endfor %}
         {% endif %}
-        {% for row in rows if relation['name'] == relation.identifier %}
+        {% for row in rows %}
             {{ return({'type': type, 'rows': rows}) }}
         {% endfor %}
 
