@@ -6,7 +6,7 @@
     {% set copy_grants = config.get('copy_grants', false) %}
 
     {% set target_relation = get_fully_qualified_relation(this).incorporate(type='table') %}
-    {% do drop_relation_unless(target_relation) %}
+    {% do drop_relation_unless(target_relation, 'table') %}
 
     -- setup
     {{ run_hooks(pre_hooks, inside_transaction=False) }}

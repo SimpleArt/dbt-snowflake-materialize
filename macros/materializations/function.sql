@@ -27,11 +27,7 @@
         ~ local_md5(sql)
     ) %}
 
-    {% set DDL = drop_relation_unless(target_relation, 'function', ['Aggregate: ' ~ aggregate, 'Query Hash: ' ~ sql_hash]) %}
-
-    {% if should_full_refresh() %}
-        {% set DDL = 'create or replace' %}
-    {% endif %}
+    {% set DDL = drop_relation_unless(target_relation, 'function', ['Aggregate: ' ~ aggregate, 'Query Hash: ' ~ sql_hash])['DDL'] %}
 
     -- setup
     {{ run_hooks(pre_hooks, inside_transaction=False) }}
@@ -56,7 +52,7 @@
             {%- endfor %}
             {%- endfor %}
             {%- endif %}
-        as $${{ sql }}$$
+        as '{{ sql.replace('\\', '\\\\').replace("'", "\\'") }}'
     {% endset %}
 
     {% if DDL == 'create if not exists' %}
@@ -110,7 +106,7 @@
     {% endif %}
 
     {% if config.persist_relation_docs() %}
-        {% do custom_persist_docs(target_relation, model, 'function', '\nAggregate: ' ~ aggregate ~ '\nQuery Hash: ' ~ sql_hash, arguments) %}
+        {% do custom_persist_docs(target_relation, model, 'function', 'Aggregate: ' ~ aggregate ~ '\\nQuery Hash: ' ~ sql_hash, arguments) %}
     {% endif %}
 
     {% if overload_version is boolean and overload_version %}
@@ -149,7 +145,7 @@
             path={'identifier': overload_identifier}
         ) %}
 
-        {% set DDL = drop_relation_unless(overload_relation, 'function', ['Aggregate: ' ~ aggregate, 'Query Hash: ' ~ sql_hash]) %}
+        {% set DDL = drop_relation_unless(overload_relation, 'function', ['Aggregate: ' ~ aggregate, 'Query Hash: ' ~ sql_hash])['DDL'] %}
 
         {% set create_or_replace %}
             {{ sql_header if sql_header is not none }}
@@ -164,7 +160,7 @@
                 {%- endfor %}
                 {%- endfor %}
                 {%- endif %}
-            as $${{ sql }}$$
+            as '{{ sql.replace('\\', '\\\\').replace("'", "\\'") }}'
         {% endset %}
 
         {% if DDL == 'create if not exists' %}
@@ -179,7 +175,7 @@
             {% endif %}
 
         {% else %}
-            {% set statue = run_query(sql_try_except(create_or_replace))[0]['STATUS'] %}
+            {% set status = run_query(sql_try_except(create_or_replace))[0]['STATUS'] %}
 
             {% if status != 'success' %}
                 {% do drop_relation_unless(overload_relation, 'table', ['Aggregate: ' ~ aggregate, 'Query Hash: ' ~ sql_hash]) %}
@@ -197,7 +193,7 @@
         {% endif %}
 
         {% if config.persist_relation_docs() %}
-            {% do custom_persist_docs(overload_relation, model, 'function', '\nAggregate: ' ~ aggregate ~ '\nQuery Hash: ' ~ sql_hash, arguments) %}
+            {% do custom_persist_docs(overload_relation, model, 'function', 'Aggregate: ' ~ aggregate ~ '\\nQuery Hash: ' ~ sql_hash, arguments) %}
         {% endif %}
 
     {% endif %}

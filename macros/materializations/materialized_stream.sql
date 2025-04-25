@@ -2,10 +2,28 @@
     {% set original_query_tag = set_query_tag() %}
     {% set sql_header = config.get('sql_header') %}
 
+    {% set alter_if = [] %}
+
+    {% set row_access_policy = config.get('row_access_policy') %}
+
+    {% if row_access_policy is not none %}
+        {% set row_access_policy = parse_jinja(row_access_policy|string)['code'] %}
+        {% set row_access_policy_hash = local_md5(row_access_policy|string) %}
+        {% do alter_if.append('Row Access Policy Hash: ' ~ row_access_policy_hash) %}
+    {% endif %}
+
+    {% if change_tracking is not none %}
+        {% set change_tracking_hash = local_md5(change_tracking|string) %}
+        {% do alter_if.append('Change Tracking Hash: ' ~ change_tracking_hash) %}
+    {% endif %}
+
+    {% if cluster_by is not none %}
+        {% set cluster_by_hash = local_md5(cluster_by|string) %}
+        {% do alter_if.append('Cluster By Hash: ' ~ cluster_by_hash) %}
+    {% endif %}
+
     {% set transient = config.get('transient', false) %}
-    {% set change_tracking = config.get('change_tracking') %}
     {% set copy_grants = config.get('copy_grants', false) %}
-    {% set cluster_by = config.get('cluster_by') %}
     {% set on_schema_change = config.get('on_schema_change', 'evolve_schema') %}
 
     {% set source_stream_relation = string_to_relation(parse_jinja(config.get('source_stream', ''))['code']) %}
@@ -85,6 +103,10 @@
     {% set batch_relation = get_fully_qualified_relation(make_temp_relation(temp_relation)).incorporate(type='table') %}
     {% set store_stream_relation = get_fully_qualified_relation(make_temp_relation(batch_relation)) %}
 
+    {% if alter_if == [] %}
+        {% set alter_if = none %}
+    {% endif %}
+
     {% if execute %}
         {% set state = {} %}
 
@@ -119,7 +141,8 @@
         {% set comment = row.get('comment', row.get('description', '')) %}
 
         {% if state == {} %}
-            {% set DDL = drop_relation_unless(target_relation, 'table') %}
+            {% set drop_result = drop_relation_unless(target_relation, 'view') %}
+            {% set DDL = drop_result['DDL'] %}
         {% elif ('Query Hash: ' ~ sql_hash) not in comment %}
             {% set DDL = 'create or replace' %}
         {% elif transient and row.get('kind') != 'TRANSIENT' %}
@@ -141,8 +164,13 @@
     {% else %}
         {% set sync = '' %}
         {% set sql_hash = '' %}
-        {% set DDL = drop_relation_unless(target_relation, 'table', none, transient) %}
         {% set prefix = '' %}
+
+        {% set drop_result = drop_relation_unless(
+            target_relation, 'table', none, transient, alter_if=alter_if
+        ) %}
+
+        {% set DDL = drop_result['DDL'] %}
     {% endif %}
 
     {% if should_full_refresh() %}

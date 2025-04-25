@@ -1,4 +1,4 @@
-{% macro drop_relation_unless(relation, drop_unless_type=none, metadata=none, transient=none) %}
+{% macro drop_relation_unless(relation, drop_unless_type=none, metadata=none, transient=none, alter_if=none) %}
 
     {% set result = get_relation_type(relation, drop_unless_type) %}
     {% set type = result.get('type') %}
@@ -12,11 +12,11 @@
         {# If the object doesn't already exist, run create or replace, #}
         {# which may include additional parameters, such as "create or replace secure ...", #}
         {# which ensures additional "alter" queries do not need to be ran. #}
-        {{ return('create or replace') }}
+        {{ return({'DDL': 'create or replace'}) }}
 
     {% elif type in ['function', 'procedure'] %}
         {# If a function/procedure needs to be created, first check if it's already created. #}
-        {% if type == drop_unless_type %}
+        {% if type == drop_unless_type and not should_full_refresh() %}
             {% for row in rows %}
                 {% set comment = row.get('comment', row.get('description', '')) %}
                 {% set state = {'flag': true} %}
@@ -26,7 +26,7 @@
                 {% endfor %}
 
                 {% if state['flag'] %}
-                    {{ return('create if not exists') }}
+                    {{ return({'DDL': 'create if not exists'}) }}
                 {% endif %}
             {% endfor %}
 
@@ -48,7 +48,7 @@
 
         {% endif %}
 
-        {{ return('create or replace') }}
+        {{ return({'DDL': 'create or replace'}) }}
 
     {% elif type != drop_unless_type %}
         {# If the object exists of the wrong type, then drop it. #}
@@ -56,56 +56,50 @@
             drop {{ type }} if exists {{ relation }}
         {% endcall %}
 
-        {{ return('create or replace') }}
+        {{ return({'DDL': 'create or replace'}) }}
+
+    {% elif should_full_refresh() %}
+        {{ return({'DDL': 'create or replace'}) }}
 
     {% endif %}
-
-    {# If the object is a stream, a "show streams" query was already ran. #}
-    {% if type == 'stream' %}
-        {% for row in rows %}
-            {% set comment = row.get('comment', row.get('description')) %}
-
-            {% if row.get('stale') == 'true' %}
-                {{ return('create or replace') }}
-
-            {% elif metadata is not none %}
-                {% for part in metadata if part not in comment %}
-                    {{ return('create or replace') }}
-                {% endfor %}
-
-            {% endif %}
-        {% endfor %}
 
     {# Check if the existing object matches the expected object. #}
-    {% elif metadata is not none or transient is not none %}
-        {% for row in rows %}
-            {% set text = row.get('text') %}
-            {% set comment = row.get('comment', row.get('description')) %}
-            {% set scheduling_state = row.get('scheduling_state') %}
+    {% for row in rows %}
+        {% set text = row.get('text') %}
+        {% set comment = row.get('comment', row.get('description')) %}
 
-            {% if scheduling_state == 'SUSPENDED' %}
-                {{ return('create or replace') }}
-            {% elif transient is not none %}
-                {% if transient and row.get('kind') != 'TRANSIENT' %}
-                    {{ return('create or replace') }}
-                {% elif not transient and row.get('kind') == 'TRANSIENT' %}
-                    {{ return('create or replace') }}
-                {% endif %}
+        {% if row.get('stale') == 'true' or row.get('scheduling_state') == 'SUSPENDED' %}
+            {{ return({'DDL': 'create or replace'}) }}
+        {% elif transient is not none %}
+            {% if transient and row.get('kind') != 'TRANSIENT' %}
+                {{ return({'DDL': 'create or replace'}) }}
+            {% elif not transient and row.get('kind') == 'TRANSIENT' %}
+                {{ return({'DDL': 'create or replace'}) }}
             {% endif %}
+        {% endif %}
 
-            {% if metadata is not none %}
-                {% for part in metadata if part not in text and part not in comment %}
-                    {{ return('create or replace') }}
-                {% endfor %}
+        {% if metadata is not none %}
+            {% for part in metadata if (not text or part not in text) and (not comment or part not in comment) %}
+                {{ return({'DDL': 'create or replace'}) }}
+            {% endfor %}
+        {% endif %}
+
+        {% if alter_if is not none %}
+            {% set result = {'DDL': 'alter if exists', 'alter_if': []} %}
+            {% for part in alter_if if (not text or part not in text) and (not comment or part not in comment) %}
+                {% do result['alter_if'].append(part) %}
+            {% endfor %}
+            {% if result['alter_if'] != [] %}
+                {{ return(result) }}
             {% endif %}
-        {% endfor %}
-    {% endif %}
+        {% endif %}
+    {% endfor %}
 
     {# Check if the existing object can still be queried. #}
-    {% if is_queryable(relation) %}
-        {{ return('create if not exists') }}
+    {% if type in ['row access policy'] or is_queryable(relation) %}
+        {{ return({'DDL': 'create if not exists'}) }}
     {% else %}
-        {{ return('create or replace') }}
+        {{ return({'DDL': 'create or replace'}) }}
     {% endif %}
 
 {% endmacro %}

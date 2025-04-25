@@ -10,11 +10,7 @@
 
     {% set sql_hash = local_md5(sql) %}
 
-    {% set DDL = drop_relation_unless(target_relation, 'materialized view', ['Query Hash: ' ~ sql_hash]) %}
-
-    {% if should_full_refresh() %}
-        {% set DDL = 'create or replace' %}
-    {% endif %}
+    {% set DDL = drop_relation_unless(target_relation, 'materialized view', ['Query Hash: ' ~ sql_hash])['DDL'] %}
 
     -- setup
     {{ run_hooks(pre_hooks, inside_transaction=False) }}

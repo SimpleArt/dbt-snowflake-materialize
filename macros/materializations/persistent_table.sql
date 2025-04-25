@@ -5,6 +5,16 @@
     {% set transient = config.get('transient', true) %}
     {% set copy_grants = config.get('copy_grants', false) %}
 
+    {% set alter_if = [] %}
+
+    {% set row_access_policy = config.get('row_access_policy') %}
+
+    {% if row_access_policy is not none %}
+        {% set row_access_policy = parse_jinja(row_access_policy|string)['code'] %}
+        {% set row_access_policy_hash = local_md5(row_access_policy|string) %}
+        {% do alter_if.append('Row Access Policy Hash: ' ~ row_access_policy_hash) %}
+    {% endif %}
+
     {% set unique_key = config.get('unique_key') %}
     {% set checksum = config.get('check_cols') %}
 
@@ -18,8 +28,18 @@
 
     {% set change_tracking = config.get('change_tracking') %}
 
+    {% if change_tracking is not none %}
+        {% set change_tracking_hash = local_md5(change_tracking|string) %}
+        {% do alter_if.append('Change Tracking Hash: ' ~ change_tracking_hash) %}
+    {% endif %}
+
     {% set tmp_relation_type = config.get('tmp_relation_type', 'view') %}
     {% set cluster_by = config.get('cluster_by') %}
+
+    {% if cluster_by is not none %}
+        {% set cluster_by_hash = local_md5(cluster_by|string) %}
+        {% do alter_if.append('Cluster By Hash: ' ~ cluster_by_hash) %}
+    {% endif %}
 
     {% if tmp_relation_type not in ['table', 'view'] %}
         {% set tmp_relation_type = 'view' %}
@@ -48,11 +68,15 @@
     {% set delta_keys_relation = make_temp_relation(temp_relation).incorporate(type='table') %}
     {% set delta_relation = make_temp_relation(delta_keys_relation).incorporate(type='table') %}
 
-    {% set DDL = drop_relation_unless(target_relation, 'table', none, transient) %}
-
-    {% if should_full_refresh() %}
-        {% set DDL = 'create or replace' %}
+    {% if alter_if == [] %}
+        {% set alter_if = none %}
     {% endif %}
+
+    {% set drop_result = drop_relation_unless(
+        target_relation, 'table', none, transient, alter_if=alter_if
+    ) %}
+
+    {% set DDL = drop_result['DDL'] %}
 
     -- setup
     {{ run_hooks(pre_hooks, inside_transaction=false) }}
@@ -63,7 +87,7 @@
     --------------------------------------------------------------------------------------------------------------------
     -- build model
 
-    {% if DDL == 'create if not exists' %}
+    {% if DDL != 'create or replace' %}
         {% call statement('setup') %}
             {{ sql_header if sql_header is not none }}
 
@@ -75,12 +99,9 @@
                 {%- endif %}
         {% endcall %}
 
-        {% if evolve_schema(
-            temp_relation,
-            target_relation,
-            transient,
-            (on_schema_change == 'evolve_schema')
-        ) %}
+        {% set queries = evolve_schema(temp_relation, target_relation, transient) %}
+
+        {% if queries != [] %}
             {% if on_schema_change == 'fail' %}
                 {% call statement('fail_schema_change') %}
                     config.on_schema_change: fail
@@ -88,16 +109,19 @@
                 {% endcall %}
             {% elif on_schema_change == 'evolve_schema' %}
                 {% set persist_strategy = 'insert_overwrite' %}
+                {% for query in queries %}
+                    {% do run_query(query) %}
+                {% endfor %}
             {% else %}
-                {% set DDL = 'create or replace' %}
+                {% set DDL = 'evolve schema' %}
             {% endif %}
         {% endif %}
     {% endif %}
 
-    {% if DDL == 'create or replace' or not execute
+    {% if DDL in ['create or replace', 'evolve schema'] or not execute
         or persist_strategy not in ['delete+insert', 'insert_overwrite', 'merge']
     %}
-        {% set DDL = 'create or replace' %}
+        {% set DDL = DDL %}
 
     {% elif persist_strategy in ['delete+insert', 'merge'] %}
         {% set union_keys = array_union(all_keys, all_checksums) %}
@@ -351,25 +375,40 @@
 
     {% endif %}
 
-    {% if DDL == 'create if not exists' %}
-        {% if change_tracking is not none and not change_tracking %}
-            {% call statement('unset_change_tracking') %}
-                alter table if exists {{ target_relation }} set
-                    change_tracking = false
-            {% endcall %}
-        {% endif %}
+    {% if DDL == 'alter if exists' and 'alter_if' in drop_result %}
+        {% set alter_table %}
+            with alter_table as procedure()
+                returns table()
+            as $$
+                begin
+                    {%- for part in drop_result['alter_if'] %}
+                    {%- if part.startswith('Row Access Policy') %}
+                    alter table if exists {{ target_relation }} drop all row access policies;
+                    alter table if exists {{ target_relation }} add row access policy {{ row_access_policy }};
+                    {%- elif part.startswith('Change Tracking') and not change_tracking %}
+                    alter table if exists {{ target_relation }} set change_tracking = false;
+                    {%- elif part.startswith('Cluster By') and cluster_by == [] %}
+                    alter table if exists {{ target_relation }} drop clustering key;
+                    {%- endif %}
+                    {%- endfor %}
+                    let res resultset := (
+                        alter table if exists {{ target_relation }} set comment = '{{ alter_if | join('\\n') }}'
+                    );
+                    return table(res);
+                end
+            $$
 
-        {% if cluster_by == [] %}
-            {% call statement('drop_clustering_key') %}
-                alter table if exists {{ target_relation }}
-                    drop clustering key
-            {% endcall %}
-        {% endif %}
+            call alter_table()
+        {% endset %}
+
+        {% call statement('alter_table') %}
+            {{ sql_run_safe(alter_table) }}
+        {% endcall %}
     {% endif %}
 
-    {% if DDL == 'create or replace' %}
+    {% if DDL in ['create or replace', 'evolve schema'] %}
         {% call statement('main') %}
-            {{ sql_header if sql_header is not none }}
+            {{ sql_header if sql_header is not none and DDL == 'create or replace' }}
 
             create or replace {{- ' transient' if transient }} table {{ target_relation }}
                 {%- if cluster_by is not none %}
@@ -378,8 +417,13 @@
                 {%- if copy_grants %}
                 copy grants
                 {%- endif %}
+                {%- if row_access_policy is not none %}
+                with row access policy {{ row_access_policy }}
+                {%- endif %}
             as
-                {%- if checksum is none and persist_strategy in ['delete+insert', 'merge'] %}
+                {%- if DDL == 'evolve schema' %}
+                select * from {{ temp_relation }}
+                {%- elif checksum is none and persist_strategy in ['delete+insert', 'merge'] %}
                 select hash(*) as {{ all_checksums[0] }}, * from ({{ sql }})
                 {%- else %}
                 {{ sql }}
@@ -583,25 +627,42 @@
 
     {% endif %}
 
-    {% if DDL == 'create if not exists' %}
-        {% if cluster_by %}
-            {% call statement('set_clustering_key') %}
-                alter table if exists {{ target_relation }}
-                    cluster by ({{ cluster_by | join(', ') }})
-            {% endcall %}
-        {% endif %}
+    {% do log(DDL) %}
+    {% do log(drop_result) %}
+    {% do log(alter_if) %}
+    {% do log(cluster_by) %}
 
-        {% call statement('drop_temp') %}
-            drop {{ tmp_relation_type }} if exists {{ temp_relation }}
-        {% endcall %}
-    {% endif %}
+    {% set alter_table %}
+        with alter_table as procedure()
+            returns table()
+        as $$
+            begin
+                {%- if DDL == 'alter if exists' %}
+                {%- for part in drop_result['alter_if'] %}
+                {%- if part.startswith('Row Access Policy') %}
+                alter table if exists {{ target_relation }} drop all row access policies;
+                alter table if exists {{ target_relation }} add row access policy {{ row_access_policy }};
+                {%- elif part.startswith('Change Tracking') %}
+                alter table if exists {{ target_relation }} set change_tracking = true;
+                {%- elif part.startswith('Cluster By') and cluster_by %}
+                alter table if exists {{ target_relation }} cluster by ({{ cluster_by | join(', ') }});
+                {%- endif %}
+                {%- endfor %}
+                {%- elif DDL in ['create or replace', 'evolve schema'] and change_tracking %}
+                alter table if exists {{ target_relation }} set change_tracking = true;
+                {%- endif %}
+                {%- if DDL != 'create if not exists' and alter_if %}
+                alter table if exists {{ target_relation }} set comment = '{{ alter_if | join('\\n') }}';
+                {%- endif %}
+                let res resultset := (
+                    drop {{ tmp_relation_type }} if exists {{ temp_relation }}
+                );
+                return table(res);
+            end
+        $$
 
-    {% if change_tracking %}
-        {% call statement('set_change_tracking') %}
-            alter table if exists {{ target_relation }} set
-                change_tracking = true
-        {% endcall %}
-    {% endif %}
+        call alter_table()
+    {% endset %}
 
     {{ run_hooks(post_hooks, inside_transaction=true) }}
 
@@ -614,7 +675,7 @@
     {% endif %}
 
     {% if config.persist_relation_docs() %}
-        {% do custom_persist_docs(target_relation, model) %}
+        {% do custom_persist_docs(target_relation, model, 'table', (alter_if | join('\\n'))) %}
     {% endif %}
 
     {% do unset_query_tag(original_query_tag) %}
