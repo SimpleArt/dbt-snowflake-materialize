@@ -163,6 +163,16 @@
     --------------------------------------------------------------------------------------------------------------------
     -- build model
 
+    {% set uncommented = uncomment_sql(sql.lower().strip()) %}
+
+    {% if uncommented.startswith('declare') or uncommented.startswith('begin') %}
+        {% set task_body -%}
+            execute immediate '{{ quote_sql(sql) }}'
+        {%- endset %}
+    {% else %}
+        {% set task_body = sql %}
+    {% endif %}
+
     {% if DDL == 'alter if exists' %}
         {% set altered = [] %}
 
@@ -249,11 +259,7 @@
                 when {{ set_configs.get('when') }}
                 {%- endif %}
             as
-                {%- if sql.strip().lower().startswith('declare') or sql.strip().lower().startswith('begin') %}
-                execute immediate '{{ quote_sql(sql) }}'
-                {%- else %}
-                {{ sql }}
-                {%- endif %}
+                {{ task_body }}
         ->>
             {%- set altered_configurations = [
                 'warehouse',
@@ -466,11 +472,7 @@
                 when {{ set_configs.get('when') }}
                 {%- endif %}
             as
-                {%- if sql.strip().lower().startswith('declare') or sql.strip().lower().startswith('begin') %}
-                execute immediate '{{ quote_sql(sql) }}'
-                {%- else %}
-                {{ sql }}
-                {%- endif %}
+                {{ task_body }}
         {% endcall %}
     {% endif %}
 
