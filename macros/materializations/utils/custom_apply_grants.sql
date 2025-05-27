@@ -54,15 +54,17 @@
 
         {% endfor %}
 
-        {% if requires_grant != [] %}
-            {% call statement('grant_privilege') %}
+        {% if requires_grant != [] or requires_revoke != [] %}
+            {% call statement('grant_privileges') %}
+            {%- if requires_grant != [] %}
                 grant {{ requires_grant | join(", ") }} on {{ type }} {{ relation }} {{- arguments if arguments is not none }} from role {{ grantee }}
-            {% endcall %}
-        {% endif %}
-
-        {% if requires_revoke != [] %}
-            {% call statement('revoke_privilege') %}
+            {%- if requires_revoke != [] %}
+            ->>
+            {%- endif %}
+            {%- endif %}
+            {%- if requires_revoke != [] %}
                 revoke {{ requires_revoke | join(", ") }} on {{ type }} {{ relation }} {{- arguments if arguments is not none }} from role {{ grantee }}
+            {%- endif %}
             {% endcall %}
         {% endif %}
 

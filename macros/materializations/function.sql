@@ -52,33 +52,29 @@
             {%- endfor %}
             {%- endfor %}
             {%- endif %}
-        as '{{ sql.replace('\\', '\\\\').replace("'", "\\'") }}'
+        as '{{ quote_sql(sql) }}'
     {% endset %}
 
     {% if DDL == 'create if not exists' %}
         {% call statement('main') %}
+        {%- if secure %}
+            alter function {{ target_relation }}{{ arguments }} set secure
+        {%- elif secure is not none %}
+            alter function {{ target_relation }}{{ arguments }} unset secure
+        {%- else %}
             select 'already exists' as status
+        {%- endif %}
         {% endcall %}
-
-        {% if secure %}
-            {% call statement('set_secure') %}
-                alter function {{ target_relation }}{{ arguments }} set secure
-            {% endcall %}
-        {% elif secure is not none %}
-            {% call statement('unset_secure') %}
-                alter function {{ target_relation }}{{ arguments }} unset secure
-            {% endcall %}
-        {% endif %}
 
     {% else %}
         {% set status = run_query(sql_try_except(create_or_replace))[0]['STATUS'] %}
 
         {% if status == 'success' %}
-            {% call statement('main') %}
-                select 'success' as status
-            {% endcall %}
+            {% set statement_name = 'main' %}
 
         {% else %}
+            {% set statement_name = 'alter_comment' %}
+
             {% do drop_relation_unless(target_relation, 'table', ['Aggregate: ' ~ aggregate, 'Query Hash: ' ~ sql_hash]) %}
 
             {% call statement('main') %}
@@ -87,7 +83,7 @@
 
         {% endif %}
 
-        {% call statement('save_hash') %}
+        {% call statement(statement_name) %}
             alter function {{ target_relation }}{{ arguments }} set comment = $$Aggregate: {{ aggregate }}\nQuery Hash: {{ sql_hash }}$$
         {% endcall %}
 
@@ -160,7 +156,7 @@
                 {%- endfor %}
                 {%- endfor %}
                 {%- endif %}
-            as '{{ sql.replace('\\', '\\\\').replace("'", "\\'") }}'
+            as '{{ quote_sql(sql) }}'
         {% endset %}
 
         {% if DDL == 'create if not exists' %}

@@ -22,40 +22,31 @@
     -- build model
     {% if DDL == 'create if not exists' %}
 
-        {% if cluster_by is none %}
-            {% call statement('set_clustering_key') %}
-                alter materialized view {{ target_relation }}
-                    drop clustering keys
-            {% endcall %}
-        {% endif %}
-
         {% call statement('main') %}
             {{ sql_header if sql_header is not none }}
 
+        {%- if cluster_by is none %}
+            alter materialized view {{ target_relation }}
+                drop clustering keys
+        ->>
+        {%- endif %}
             create {{- " secure" if secure }} materialized view if not exists {{ target_relation }}
                 {%- if cluster_by is not none %}
                 cluster by ({{ cluster_by | join(', ') }})
                 {%- endif %}
             as
                 /* Query Hash: {{ sql_hash }} */ {{ sql }}
+        {%- if secure %}
+        ->> alter materialized view {{ target_relation }} set secure
+        {%- elif secure is not none %}
+        ->> alter materialized view {{ target_relation }} unset secure
+        {%- endif %}
+        {%- if cluster_by is not none %}
+        ->>
+            alter materialized view {{ target_relation }}
+                cluster by ({{ cluster_by | join(', ') }})
+        {%- endif %}
         {% endcall %}
-
-        {% if secure %}
-            {% call statement('set_secure') %}
-                alter materialized view {{ target_relation }} set secure
-            {% endcall %}
-        {% elif secure is not none %}
-            {% call statement('unset_secure') %}
-                alter materialized view {{ target_relation }} unset secure
-            {% endcall %}
-        {% endif %}
-
-        {% if cluster_by is not none %}
-            {% call statement('drop_clustering_key') %}
-                alter materialized view {{ target_relation }}
-                    cluster by ({{ cluster_by | join(', ') }})
-            {% endcall %}
-        {% endif %}
 
     {% else %}
 

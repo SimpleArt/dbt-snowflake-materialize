@@ -42,29 +42,17 @@
                 /* Recursive: {{ recursive }} */
                 /* Query Hash: {{ sql_hash }} */
                 {{ sql }}
+        {%- if secure %}
+        ->> alter view {{ target_relation }} set secure
+        {%- elif secure is not none %}
+        ->> alter view {{ target_relation }} unset secure
+        {%- endif %}
+        {%- if change_tracking %}
+        ->> alter view if exists {{ target_relation }} set change_tracking = true
+        {%- elif change_tracking is not none %}
+        ->> alter view if exists {{ target_relation }} set change_tracking = false
+        {%- endif %}
         {% endcall %}
-
-        {% if secure %}
-            {% call statement('set_secure') %}
-                alter view {{ target_relation }} set secure
-            {% endcall %}
-        {% elif secure is not none %}
-            {% call statement('unset_secure') %}
-                alter view {{ target_relation }} unset secure
-            {% endcall %}
-        {% endif %}
-
-        {% if change_tracking %}
-            {% call statement('set_change_tracking') %}
-                alter view if exists {{ target_relation }} set
-                    change_tracking = true
-            {% endcall %}
-        {% elif change_tracking is not none %}
-            {% call statement('set_change_tracking') %}
-                alter view if exists {{ target_relation }} set
-                    change_tracking = false
-            {% endcall %}
-        {% endif %}
 
     {% else %}
 

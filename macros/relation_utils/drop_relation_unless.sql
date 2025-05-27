@@ -9,13 +9,13 @@
     {% endif %}
 
     {% if type is none or not execute %}
-        {# If the object doesn't already exist, run create or replace, #}
+        {# If the object does not already exist, run create or replace, #}
         {# which may include additional parameters, such as "create or replace secure ...", #}
         {# which ensures additional "alter" queries do not need to be ran. #}
-        {{ return({'DDL': 'create or replace'}) }}
+        {{ return({'DDL': 'create or replace', 'type': type}) }}
 
     {% elif type in ['function', 'procedure'] %}
-        {# If a function/procedure needs to be created, first check if it's already created. #}
+        {# If a function/procedure needs to be created, first check if it is already created. #}
         {% if type == drop_unless_type and not should_full_refresh() %}
             {% for row in rows %}
                 {% set comment = row.get('comment', row.get('description', '')) %}
@@ -26,7 +26,7 @@
                 {% endfor %}
 
                 {% if state['flag'] %}
-                    {{ return({'DDL': 'create if not exists'}) }}
+                    {{ return({'DDL': 'create if not exists', 'type': type, 'rows': rows}) }}
                 {% endif %}
             {% endfor %}
 
@@ -48,18 +48,15 @@
 
         {% endif %}
 
-        {{ return({'DDL': 'create or replace'}) }}
+        {{ return({'DDL': 'create or replace', 'type': type}) }}
 
-    {% elif type != drop_unless_type %}
+    {% elif type != drop_unless_type or should_full_refresh() %}
         {# If the object exists of the wrong type, then drop it. #}
         {% call statement('drop_object') %}
             drop {{ type }} if exists {{ relation }}
         {% endcall %}
 
-        {{ return({'DDL': 'create or replace'}) }}
-
-    {% elif should_full_refresh() %}
-        {{ return({'DDL': 'create or replace'}) }}
+        {{ return({'DDL': 'create or replace', 'type': type}) }}
 
     {% endif %}
 
@@ -69,23 +66,23 @@
         {% set comment = row.get('comment', row.get('description')) %}
 
         {% if row.get('stale') == 'true' or row.get('scheduling_state') == 'SUSPENDED' %}
-            {{ return({'DDL': 'create or replace'}) }}
+            {{ return({'DDL': 'create or replace', 'type': type, 'rows': rows}) }}
         {% elif transient is not none %}
             {% if transient and row.get('kind') != 'TRANSIENT' %}
-                {{ return({'DDL': 'create or replace'}) }}
+                {{ return({'DDL': 'create or replace', 'type': type, 'rows': rows}) }}
             {% elif not transient and row.get('kind') == 'TRANSIENT' %}
-                {{ return({'DDL': 'create or replace'}) }}
+                {{ return({'DDL': 'create or replace', 'type': type, 'rows': rows}) }}
             {% endif %}
         {% endif %}
 
         {% if metadata is not none %}
             {% for part in metadata if (not text or part not in text) and (not comment or part not in comment) %}
-                {{ return({'DDL': 'create or replace'}) }}
+                {{ return({'DDL': 'create or replace', 'type': type, 'rows': rows}) }}
             {% endfor %}
         {% endif %}
 
         {% if alter_if is not none %}
-            {% set result = {'DDL': 'alter if exists', 'alter_if': []} %}
+            {% set result = {'DDL': 'alter if exists', 'alter_if': [], 'type': type, 'rows': rows} %}
             {% for part in alter_if if (not text or part not in text) and (not comment or part not in comment) %}
                 {% do result['alter_if'].append(part) %}
             {% endfor %}
@@ -96,10 +93,19 @@
     {% endfor %}
 
     {# Check if the existing object can still be queried. #}
-    {% if type in ['row access policy'] or is_queryable(relation) %}
-        {{ return({'DDL': 'create if not exists'}) }}
+    {% if
+        not type.endswith('table')
+        and not type.endswith('view')
+        and type != 'stream'
+    %}
+        {{ return({'DDL': 'create if not exists', 'type': type, 'rows': rows}) }}
+    {% elif
+        type in ['table', 'semantic view']
+        or is_queryable(relation)
+    %}
+        {{ return({'DDL': 'create if not exists', 'type': type, 'rows': rows}) }}
     {% else %}
-        {{ return({'DDL': 'create or replace'}) }}
+        {{ return({'DDL': 'create or replace', 'type': type, 'rows': rows}) }}
     {% endif %}
 
 {% endmacro %}

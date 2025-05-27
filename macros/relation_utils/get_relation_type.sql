@@ -30,27 +30,39 @@
             {{ return({'type': type, 'rows': rows}) }}
         {% endfor %}
 
-        {% call statement('get_relation_type__' ~ relation, fetch_result=true) %}
-            select
-                reduce(
-                    split(
-                        regexp_replace(
-                            lower(get_ddl($$table$$, $${{ relation }}$$)),
-                            $$^(\s|\n)*(create )?(or )?(replace )?(alter )?(secure )?(local )?(global )?(temp )?(temporary )?(volatile )?(transient )?(recursive )?$$,
-                            $$$$
-                        ),
-                        $$ $$
-                    ),
-                    $$$$,
-                    (result, word) -> iff(result like any ($$%table$$, $$%view$$), result, result || $$ $$ || word)
-                ) as relation_type
-        {% endcall %}
+        {% set query %}
+            with get_relation_type as procedure()
+                returns table()
+            as '
+                begin
+                    let res resultset := (
+                        select
+                            reduce(
+                                split(
+                                    regexp_replace(
+                                        lower(get_ddl($$table$$, $${{ relation }}$$)),
+                                        $$^(\s|\n)*(create )?(or )?(replace )?(alter )?(secure )?(local )?(global )?(temp )?(temporary )?(volatile )?(transient )?(recursive )?$$,
+                                        $$$$
+                                    ),
+                                    $$ $$
+                                ),
+                                $$$$,
+                                (result, word) -> iff(result like any ($$%table$$, $$%view$$), result, result || $$ $$ || word)
+                            ) as relation_type
+                    );
+                    return table(res);
+                exception when other then
+                    let error_response resultset := (select 1 as x where false);
+                    return table(error_response);
+                end
+            '
 
-        {% set result = load_result('get_relation_type__' ~ relation) %}
+            call get_relation_type()
+        {% endset %}
 
-        {% if result['response']['code'] == 'SUCCESS' %}
-            {{ return({'type': result['data'][0][0]}) }}
-        {% endif %}
+        {% for row in run_query(query) %}
+            {{ return({'type': row[0]}) }}
+        {% endfor %}
 
         {% for check_type in [
             'data metric function',
@@ -78,7 +90,8 @@
             'session policy',
             'streamlit',
             'notebook',
-            'image repository'
+            'image repository',
+            'semantic view'
         ] if check_type != show_type %}
             {%
                 for row in run_query(show_relation(relation, check_type))

@@ -198,12 +198,12 @@
     {% elif execute and materialize_mode == 'batch_refresh' %}
         {% set check_schema = true %}
 
-        {% call statement('save_stream') %}
+        {% call statement('temp_tables') %}
+            {{ sql_header if sql_header is not none }}
+
             create or replace temporary table {{ store_stream_relation }} as
                 select * from {{ source_stream_relation }}
-        {% endcall %}
-
-        {% call statement('create_refresh_relation') %}
+        ->>
             create or replace temporary table {{ temp_relation }} as
                 select
                     source_table.*
@@ -224,11 +224,7 @@
                         {%- for column in refresh_by %}
                         and source_stream.{{ column }} is not distinct from source_table.{{ column }}
                         {%- endfor %}
-        {% endcall %}
-
-        {% call statement('save_sql') %}
-            {{ sql_header if sql_header is not none }}
-
+        ->>
             create or replace temporary table {{ temp_relation }} as
                 select
                     hash(*) as metadata$checksum,
@@ -356,7 +352,7 @@
             {% endfor %}
 
         {% else %}
-            {% call statement('create_batch_relation') %}
+            {% call statement('get_count_distinct') %}
                 {{ sql_header if sql_header is not none }}
 
                 create or replace temporary table {{ batch_relation }} as
@@ -395,9 +391,7 @@
                         or {{ column }} is not null
                         {%- endif %}
                         {%- endfor %}
-            {% endcall %}
-
-            {% call statement('get_count_distinct') %}
+            ->>
                 select
                     {%- for column in count_aggs %}
                     approx_count_distinct({{ column }}) as {{ column }},
@@ -427,7 +421,7 @@
                     {% do dimensions.append(adapter.quote(column.name)) %}
             {% endfor %}
 
-            {% call statement('aggregate_batch_relation') %}
+            {% set get_row_count %}
                 create or replace temporary table {{ batch_relation }} as
                     select
                         *,
@@ -462,9 +456,7 @@
                         )
                     order by
                         {{ adapter.quote("metadata$row_index") }}
-            {% endcall %}
-
-            {% set get_row_count %}
+            ->>
                 select count(*) as row_count from {{ batch_relation }}
             {% endset %}
 
@@ -624,7 +616,7 @@
     {% endif %}
 
     {% if execute and materialize_mode == 'batch_refresh' and DDL == 'create if not exists' %}
-        {% call statement('create_delete_relation') %}
+        {% set stats_query %}
             create or replace temporary table {{ batch_relation }} as
                 select
                     source_table.*
@@ -645,9 +637,7 @@
                         {%- for column in refresh_by %}
                         and source_stream.{{ column }} is not distinct from source_table.{{ column }}
                         {%- endfor %}
-        {% endcall %}
-
-        {% call statement('save_deltas') %}
+        ->>
             create or replace temporary table {{ store_stream_relation }} as
                 with
                     inserts as (
@@ -706,9 +696,7 @@
                     )
 
                 select * from final
-        {% endcall %}
-
-        {% set stats_query %}
+        ->>
             select
                 zeroifnull(max({{ adapter.quote('persistent$inserts') }})) as insert_dupes,
                 zeroifnull(max({{ adapter.quote('persistent$deletes') }})) as delete_dupes,
@@ -890,7 +878,7 @@
         {% endcall %}
 
     {% elif persist_strategy == 'delete+insert' %}
-        {% call statement('delete_removed') %}
+        {% call statement('main') %}
             delete from
                 {{ target_relation }} as destination
             using
@@ -898,9 +886,7 @@
             where
                 destination.metadata$checksum = delta.metadata$checksum
                 and delta.{{ adapter.quote('persistent$deletes') }} is not null
-        {% endcall %}
-
-        {% call statement('main') %}
+        ->>
             insert into {{ target_relation }}
                 select
                     *
@@ -988,24 +974,27 @@
 
     {% endif %}
 
-    {% if DDL == 'create if not exists' and cluster_by is not none %}
-        {% call statement('set_clustering_key') %}
+    {% if (DDL == 'create if not exists' and cluster_by is not none)
+        or not (config.persist_relation_docs() and model.description)
+        or change_tracking
+    %}
+        {% call statement('alter_table') %}
+            select 1 as no_op
+        {%- if DDL == 'create if not exists' and cluster_by is not none %}
+        ->>
             alter table if exists {{ target_relation }}
-                    cluster by ({{ cluster_by | join(', ') }})
-        {% endcall %}
-    {% endif %}
-
-    {% if not (config.persist_relation_docs() and model.description) %}
-        {% call statement('save_metadata') %}
+                cluster by ({{ cluster_by | join(', ') }})
+        {%- endif %}
+        {%- if not (config.persist_relation_docs() and model.description) %}
+        ->>
             alter table {{ target_relation }} set
                 comment = $${{ prefix }}Sync: {{ sync }}\nQuery Hash: {{ sql_hash }}$$
-        {% endcall %}
-    {% endif %}
-
-    {% if change_tracking %}
-        {% call statement('set_change_tracking') %}
+        {%- endif %}
+        {%- if change_tracking %}
+        ->>
             alter table if exists {{ target_relation }} set
                 change_tracking = true
+        {%- endif %}
         {% endcall %}
     {% endif %}
 
