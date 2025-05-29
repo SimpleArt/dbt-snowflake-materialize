@@ -297,10 +297,10 @@
         {% endfor %}
     {% endif %}
 
-    {% if partition_by is none or partition_by == [] %}
-        {% set delta_relation = get_fully_qualified_relation(make_temp_relation(temp_relation).incorporate(type='table')) %}
+    {% set delta_relation = get_fully_qualified_relation(make_temp_relation(temp_relation).incorporate(type='table')) %}
 
-        {% call statement('main') %}
+    {% if partition_by is none or partition_by == [] %}
+        {% set delta_query %}
             {%- if alter_transient == [] %}
             {%- if DDL == 'alter if exists' and 'alter_if' in drop_result and cluster_by == [] %}
             {%- for part in drop_result['alter_if'] if part.startswith('Cluster By') %}
@@ -353,21 +353,212 @@
 
                 select distinct
                     {%- for column in any_keys %}
-                    ifnull(source.{{ column }}, history.{{ column }}) as {{ column }},
+                    ifnull(source.{{ column }}, history.{{ column }}) as {{ column }} {{- ',' if not loop.last }}
                     {%- endfor %}
-                    source.{{ adapter.quote("source$flag") }},
-                    history.{{ adapter.quote("history$flag") }}
                 from
                     source
                 full outer join
                     history
-                        {%- for column in array_union(all_keys, all_checksums) %}
+                        {%- for column in any_keys %}
                         {{ 'on ' if loop.first else 'and ' -}}
                         source.{{ column }} is not distinct from history.{{ column }}
                         {%- endfor %}
                 where
                     source.{{ adapter.quote("source$flag") }} is distinct from history.{{ adapter.quote("history$flag") }}
+                    {%- for column in all_checksums %}
+                    or source.{{ column }} is distinct from history.{{ column }}
+                    {%- endfor %}
         ->>
+            select
+                count(*)
+            from
+                {{ temp_relation }} as source
+            left join
+                (
+                    select
+                        *,
+                        1 as {{ adapter.quote("delta$flag") }}
+                    from
+                        {{ delta_relation }}
+                ) as delta
+                    {%- for column in any_keys %}
+                    {{ 'on ' if loop.first else 'and ' -}}
+                    source.{{ column }} is not distinct from delta.{{ column }}
+                    {%- endfor %}
+            where
+                delta.{{ adapter.quote("delta$flag") }} is null
+
+            union
+
+            select
+                count(*)
+            from
+                {{ history_relation }} as source
+            left join
+                (
+                    select
+                        *,
+                        1 as {{ adapter.quote("delta$flag") }}
+                    from
+                        {{ delta_relation }}
+                ) as delta
+                    {%- for column in any_keys %}
+                    {{ 'on ' if loop.first else 'and ' -}}
+                    history.{{ column }} is not distinct from delta.{{ column }}
+                    {%- endfor %}
+            where
+                delta.{{ adapter.quote("delta$flag") }} is null
+        ->>
+            delete from
+                {{ delta_relation }} as destination
+            using
+                (
+                    select
+                        {%- for column in any_keys %}
+                        source.{{ column }},
+                        {%- endfor %}
+                        hash_agg(
+                            {%- set temp = array_difference(all_checksums, any_keys) %}
+                            {%- if temp == [] %}
+                                {%- set temp = ['*'] %}
+                            {%- endif %}
+                            {%- for column in temp %}
+                            source.{{ column }} {{- ',' if not loop.last }}
+                            {%- endfor %}
+                        ) as {{ adapter.quote("delta$checksum") }}
+                    from
+                        {{ temp_relation }} as source
+                    inner join
+                        {{ delta_relation }} as delta
+                            {%- for column in any_keys %}
+                            {{ 'on ' if loop.first else 'and ' -}}
+                            source.{{ column }} is not distinct from delta.{{ column }}
+                            {%- endfor %}
+                    group by
+                        all
+
+                    intersect
+
+                    select
+                        {%- for column in any_keys %}
+                        history.{{ column }},
+                        {%- endfor %}
+                        hash_agg(
+                            {%- set temp = array_difference(all_checksums, any_keys) %}
+                            {%- if temp == [] %}
+                                {%- set temp = ['*'] %}
+                            {%- endif %}
+                            {%- for column in temp %}
+                            history.{{ column }} {{- ',' if not loop.last }}
+                            {%- endfor %}
+                        ) as {{ adapter.quote("delta$checksum") }}
+                    from
+                        {{ history_relation }} as history
+                    inner join
+                        {{ delta_relation }} as delta
+                            {%- for column in any_keys %}
+                            {{ 'on ' if loop.first else 'and ' -}}
+                            history.{{ column }} is not distinct from delta.{{ column }}
+                            {%- endfor %}
+                    group by
+                        all
+                ) as source
+            where
+                {%- for column in any_keys %}
+                destination.{{ column }} is not distinct from source.{{ column }}
+                {%- endfor %}
+        ->>
+            select count(*) from $2 having count(*) = 2
+        {% endset %}
+
+        {% call statement('main') %}
+        {%- for row in run_query(delta_query) %}
+            insert into {{ delta_relation }}
+                with
+                    source as (
+                        select
+                            {%- for column in any_keys %}
+                            source.{{ column }},
+                            {%- endfor %}
+                            hash_agg(
+                                {%- set temp = array_difference(all_checksums, any_keys) %}
+                                {%- if temp == [] %}
+                                    {%- set temp = ['*'] %}
+                                {%- endif %}
+                                {%- for column in temp %}
+                                source.{{ column }} {{- ',' if not loop.last }}
+                                {%- endfor %}
+                            ) as {{ adapter.quote("delta$checksum") }}
+                        from
+                           {{ temp_relation }} as source
+                        left join
+                            (
+                                select
+                                    *,
+                                    1 as {{ adapter.quote("delta$flag") }}
+                                from
+                                    {{ delta_relation }}
+                            ) as delta
+                                {%- for column in any_keys %}
+                                {{ 'on ' if loop.first else 'and ' -}}
+                                source.{{ column }} is not distinct from delta.{{ column }}
+                                {%- endfor %}
+                        where
+                            delta.{{ adapter.quote("delta$flag") }} is null
+                        group by
+                            all
+                    ),
+
+                    history as (
+                        select
+                            {%- for column in any_keys %}
+                            history.{{ column }},
+                            {%- endfor %}
+                            hash_agg(
+                                {%- set temp = array_difference(all_checksums, any_keys) %}
+                                {%- if temp == [] %}
+                                    {%- set temp = ['*'] %}
+                                {%- endif %}
+                                {%- for column in temp %}
+                                history.{{ column }} {{- ',' if not loop.last }}
+                                {%- endfor %}
+                            ) as {{ adapter.quote("delta$checksum") }}
+                        from
+                           {{ history_relation }} as history
+                        left join
+                            (
+                                select
+                                    *,
+                                    1 as {{ adapter.quote("delta$flag") }}
+                                from
+                                    {{ delta_relation }}
+                            ) as delta
+                                {%- for column in any_keys %}
+                                {{ 'on ' if loop.first else 'and ' -}}
+                                history.{{ column }} is not distinct from delta.{{ column }}
+                                {%- endfor %}
+                        where
+                            delta.{{ adapter.quote("delta$flag") }} is null
+                        group by
+                            all
+                    )
+
+                select
+                    {%- for column in any_keys %}
+                    ifnull(source.{{ column }}, history.{{ column }}) as {{ column }} {{- ',' if not loop.last }}
+                    {%- endfor %}
+                from
+                    source
+                full outer join
+                    history
+                        {%- for column in any_keys %}
+                        {{ 'on ' if loop.first else 'and ' -}}
+                        source.{{ column }} is not distinct from history.{{ column }}
+                        {%- endfor %}
+                where
+                    source.{{ adapter.quote("delta$checksum") }} is distinct from history.{{ adapter.quote("delta$checksum") }}
+        ->>
+        {%- endfor %}
             create or replace transient table {{ inserts_relation }}
                 {%- if copy_grants %}
                 copy grants
@@ -379,9 +570,9 @@
                     {{ temp_relation }} as source
                 inner join
                     {{ delta_relation }} as delta
-                        on delta.{{ adapter.quote("source$flag") }} = 1
                         {%- for column in any_keys %}
-                        and source.{{ column }} is not distinct from delta.{{ column }}
+                        {{ 'on ' if loop.first else 'and ' -}}
+                        source.{{ column }} is not distinct from delta.{{ column }}
                         {%- endfor %}
         ->>
             create or replace transient table {{ deletes_relation }}
@@ -390,14 +581,18 @@
                 {%- endif %}
             as
                 select
-                    * exclude (
-                        {{ adapter.quote("source$flag") }},
-                        {{ adapter.quote("history$flag") }}
-                    )
+                    *
                 from
                     {{ delta_relation }}
-                where
-                    {{ adapter.quote("history$flag") }} = 1
+
+                intersect
+
+                select
+                    {%- for column in any_keys %}
+                    {{ column }} {{- ',' if not loop.last }}
+                    {%- endfor %}
+                from
+                    {{ history_relation }}
         ->>
             create or replace view {{ target_relation }}
                 {%- if copy_grants %}
@@ -451,13 +646,13 @@
 
         {% set partitions = run_query(partition_query) %}
 
-        {% set delta_relations = {} %}
+        {% set partition_relations = {} %}
 
         {% for partition in partitions %}
             {% if temp_relation.endswith('"') %}
-                {% do delta_relations.update({partition[-1]: temp_relation.incorporate(path={'identifier': temp_relation.identifier[:-1] ~ '__DELTA_' ~ partition[-1] ~ '"'})}) %}
+                {% do partition_relations.update({partition[-1]: temp_relation.incorporate(path={'identifier': temp_relation.identifier[:-1] ~ '__PARTITION_' ~ partition[-1] ~ '"'})}) %}
             {% else %}
-                {% do delta_relations.update({partition[-1]: temp_relation.incorporate(path={'identifier': temp_relation.identifier ~ '__DELTA_' ~ partition[-1]})}) %}
+                {% do partition_relations.update({partition[-1]: temp_relation.incorporate(path={'identifier': temp_relation.identifier ~ '__PARTITION_' ~ partition[-1]})}) %}
             {% endif %}
         {% endfor %}
 
@@ -516,7 +711,7 @@
                     {%- for partition in partitions %}
 
                     async (
-                        create or replace temporary table {{ delta_relations[partition[-1]] }} as
+                        create or replace temporary table {{ partition_relations[partition[-1]] }} as
                             with
                                 source as (
                                     select
@@ -556,64 +751,266 @@
 
                             select distinct
                                 {%- for column in any_keys %}
-                                ifnull(source.{{ column }}, history.{{ column }}) as {{ column }},
+                                ifnull(source.{{ column }}, history.{{ column }}) as {{ column }} {{- ',' if not loop.last }}
                                 {%- endfor %}
-                                source.{{ adapter.quote("source$flag") }},
-                                history.{{ adapter.quote("history$flag") }}
                             from
                                 source
                             full outer join
                                 destination
-                                    {%- for column in array_union(all_keys, all_checksums) %}
+                                    {%- for column in any_keys %}
                                     {{ 'on ' if loop.first else 'and ' -}}
                                     source.{{ column }} is not distinct from history.{{ column }}
                                     {%- endfor %}
                             where
                                 source.{{ adapter.quote("source$flag") }} is distinct from history.{{ adapter.quote("history$flag") }}
+                                {%- for column in array_difference(all_checksums, any_keys) %}
+                                or source.{{ column }} is distinct from history.{{ column }}
+                                {%- endfor %}
                     );
 
                     {%- endfor %}
 
                     await all;
 
+                    create or replace temporary table {{ delta_relation }} as
+                        {%- for partition_relation in partition_relations.values() %}
+                        select * from {{ partition_relation }}
+                        {%- if not loop.last %}
+                        union all
+                        {%- endif %}
+                        {%- endfor %};
+
+                    let historical_duplicates resultset := (
+                        select
+                            count(*) as counts
+                        from
+                            (
+                                select
+                                    count(*)
+                                from
+                                    {{ temp_relation }} as source
+                                left join
+                                    (
+                                        select
+                                            *,
+                                            1 as {{ adapter.quote("delta$flag") }}
+                                        from
+                                            {{ delta_relation }}
+                                    ) as delta
+                                        {%- for column in any_keys %}
+                                        {{ 'on ' if loop.first else 'and ' -}}
+                                        source.{{ column }} is not distinct from delta.{{ column }}
+                                        {%- endfor %}
+                                where
+                                    delta.{{ adapter.quote("delta$flag") }} is null
+
+                                union
+
+                                select
+                                    count(*)
+                                from
+                                    {{ history_relation }} as source
+                                left join
+                                    (
+                                        select
+                                            *,
+                                            1 as {{ adapter.quote("delta$flag") }}
+                                        from
+                                            {{ delta_relation }}
+                                    ) as delta
+                                        {%- for column in any_keys %}
+                                        {{ 'on ' if loop.first else 'and ' -}}
+                                        history.{{ column }} is not distinct from delta.{{ column }}
+                                        {%- endfor %}
+                                where
+                                    delta.{{ adapter.quote("delta$flag") }} is null
+                            )
+                        having
+                            count(*) = 2
+                    );
+
+                    delete from
+                        {{ delta_relation }} as destination
+                    using
+                        (
+                            select
+                                {%- for column in any_keys %}
+                                source.{{ column }},
+                                {%- endfor %}
+                                hash_agg(
+                                    {%- set temp = array_difference(all_checksums, any_keys) %}
+                                    {%- if temp == [] %}
+                                        {%- set temp = ['*'] %}
+                                    {%- endif %}
+                                    {%- for column in temp %}
+                                    source.{{ column }} {{- ',' if not loop.last }}
+                                    {%- endfor %}
+                                ) as {{ adapter.quote("delta$checksum") }}
+                            from
+                                {{ temp_relation }} as source
+                            inner join
+                                {{ delta_relation }} as delta
+                                    {%- for column in any_keys %}
+                                    {{ 'on ' if loop.first else 'and ' -}}
+                                    source.{{ column }} is not distinct from delta.{{ column }}
+                                    {%- endfor %}
+                            group by
+                                all
+
+                            intersect
+
+                            select
+                                {%- for column in any_keys %}
+                                history.{{ column }},
+                                {%- endfor %}
+                                hash_agg(
+                                    {%- set temp = array_difference(all_checksums, any_keys) %}
+                                    {%- if temp == [] %}
+                                        {%- set temp = ['*'] %}
+                                    {%- endif %}
+                                    {%- for column in temp %}
+                                    history.{{ column }} {{- ',' if not loop.last }}
+                                    {%- endfor %}
+                                ) as {{ adapter.quote("delta$checksum") }}
+                            from
+                                {{ history_relation }} as history
+                            inner join
+                                {{ delta_relation }} as delta
+                                    {%- for column in any_keys %}
+                                    {{ 'on ' if loop.first else 'and ' -}}
+                                    history.{{ column }} is not distinct from delta.{{ column }}
+                                    {%- endfor %}
+                            group by
+                                all
+                        ) as source
+                    where
+                        {%- for column in any_keys %}
+                        destination.{{ column }} is not distinct from source.{{ column }}
+                        {%- endfor %};
+
+                    for record in historical_duplicates do
+                        insert into {{ delta_relation }}
+                            with
+                                source as (
+                                    select
+                                        {%- for column in any_keys %}
+                                        source.{{ column }},
+                                        {%- endfor %}
+                                        hash_agg(
+                                            {%- set temp = array_difference(all_checksums, any_keys) %}
+                                            {%- if temp == [] %}
+                                                {%- set temp = ['*'] %}
+                                            {%- endif %}
+                                            {%- for column in temp %}
+                                            source.{{ column }} {{- ',' if not loop.last }}
+                                            {%- endfor %}
+                                        ) as {{ adapter.quote("delta$checksum") }}
+                                    from
+                                       {{ temp_relation }} as source
+                                    left join
+                                        (
+                                            select
+                                                *,
+                                                1 as {{ adapter.quote("delta$flag") }}
+                                            from
+                                                {{ delta_relation }}
+                                        ) as delta
+                                            {%- for column in any_keys %}
+                                            {{ 'on ' if loop.first else 'and ' -}}
+                                            source.{{ column }} is not distinct from delta.{{ column }}
+                                            {%- endfor %}
+                                    where
+                                        delta.{{ adapter.quote("delta$flag") }} is null
+                                    group by
+                                        all
+                                ),
+
+                                history as (
+                                    select
+                                        {%- for column in any_keys %}
+                                        history.{{ column }},
+                                        {%- endfor %}
+                                        hash_agg(
+                                            {%- set temp = array_difference(all_checksums, any_keys) %}
+                                            {%- if temp == [] %}
+                                                {%- set temp = ['*'] %}
+                                            {%- endif %}
+                                            {%- for column in temp %}
+                                            history.{{ column }} {{- ',' if not loop.last }}
+                                            {%- endfor %}
+                                        ) as {{ adapter.quote("delta$checksum") }}
+                                    from
+                                       {{ history_relation }} as history
+                                    left join
+                                        (
+                                            select
+                                                *,
+                                                1 as {{ adapter.quote("delta$flag") }}
+                                            from
+                                                {{ delta_relation }}
+                                        ) as delta
+                                            {%- for column in any_keys %}
+                                            {{ 'on ' if loop.first else 'and ' -}}
+                                            history.{{ column }} is not distinct from delta.{{ column }}
+                                            {%- endfor %}
+                                    where
+                                        delta.{{ adapter.quote("delta$flag") }} is null
+                                    group by
+                                        all
+                                )
+
+                            select
+                                {%- for column in any_keys %}
+                                ifnull(source.{{ column }}, history.{{ column }}) as {{ column }} {{- ',' if not loop.last }}
+                                {%- endfor %}
+                            from
+                                source
+                            full outer join
+                                history
+                                    {%- for column in any_keys %}
+                                    {{ 'on ' if loop.first else 'and ' -}}
+                                    source.{{ column }} is not distinct from history.{{ column }}
+                                    {%- endfor %}
+                            where
+                                source.{{ adapter.quote("delta$checksum") }} is distinct from history.{{ adapter.quote("delta$checksum") }};
+                    end for;
+
                     async (
-                        create or replace transient table {{ inserts_relation }} as
+                        create or replace transient table {{ inserts_relation }}
+                            {%- if copy_grants %}
+                            copy grants
+                            {%- endif %}
+                        as
                             select
                                 source.*
                             from
                                 {{ temp_relation }} as source
                             inner join
-                                (
-                                    {%- for delta_relation in delta_relations.values() %}
-                                    select * from {{ delta_relation }}
-                                    {%- if not loop.last %}
-                                    union all
-                                    {%- endif %}
-                                    {%- endfor %}
-                                ) as delta
-                                    on delta.{{ adapter.quote("source$flag") }} = 1
+                                {{ delta_relation }} as delta
                                     {%- for column in any_keys %}
-                                    and source.{{ column }} is not distinct from delta.{{ column }}
+                                    {{ 'on ' if loop.first else 'and ' -}}
+                                    source.{{ column }} is not distinct from delta.{{ column }}
                                     {%- endfor %}
                     );
 
-                    create or replace transient table {{ deletes_relation }} as
+                    create or replace transient table {{ deletes_relation }}
+                        {%- if copy_grants %}
+                        copy grants
+                        {%- endif %}
+                    as
                         select
-                            * exclude (
-                                {{ adapter.quote("source$flag") }},
-                                {{ adapter.quote("history$flag") }}
-                            )
+                            *
                         from
-                            (
-                                {%- for delta_relation in delta_relations.values() %}
-                                select * from {{ delta_relation }}
-                                {%- if not loop.last %}
-                                union all
-                                {%- endif %}
-                                {%- endfor %}
-                            )
-                        where
-                            {{ adapter.quote("history$flag") }} = 1;
+                            {{ delta_relation }}
+
+                        intersect
+
+                        select
+                            {%- for column in any_keys %}
+                            {{ column }} {{- ',' if not loop.last }}
+                            {%- endfor %}
+                        from
+                            {{ history_relation }};
 
                     await all;
 
