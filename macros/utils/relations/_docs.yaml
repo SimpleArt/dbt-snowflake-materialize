@@ -1,0 +1,13 @@
+version: 2
+
+macros:
+  - name: drop_relation
+    description: Drops the relation unless the relation is the specified type. Returns the DDL (create or replace, create if not exists, etc.) specified from the query, which is appended to the end of a "show" query using Snowflake's pipe operator. Also allows checking if the relation can still be queried (e.g. stale view). Also returns the result of the provided query.
+  - name: get_fully_qualified_identifier
+    description: Returns the fully qualified identifier by upper-casing non-quoted identifiers.
+  - name: get_fully_qualified_relation
+    description: Returns the fully qualified relation by upper-casing non-quoted database, schema, and identifiers.
+  - name: get_relation_type
+    description: Returns the type of database object that a relation is, or none. Allows for a specific type to check first for faster model build times. A query may be passed in to post-process the "show" query using Snowflake's pipe operator. Also returns the result of the provided query.
+  - name: show_relation
+    description: Returns the "show" query string. Handles pluarility and quoting.

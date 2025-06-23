@@ -2,29 +2,46 @@
     {% set original_query_tag = set_query_tag() %}
     {% set sql_header = config.get('sql_header') %}
 
-    {% set returns = config.get('returns', 'varchar') %}
-    {% set language = config.get('language') %}
+    {% set anonymous_procedure = config.get('anonymous_procedure') %}
+    {% set script_materialization = config.get('script_materialization') %}
+    {% set drop_if = config.get('drop_if') %}
 
-    {% if language is string %}
-        {% set language = {language: []} %}
+    {% if anonymous_procedure is mapping %}
+        {% set returns = anonymous_procedure.get('returns', 'varchar') %}
+        {% set procedure_config = anonymous_procedure.get('procedure_config') %}
+
+        {% if procedure_config is iterable and procedure_config is not string %}
+            {% set temp = [] %}
+            {% for line in procedure_config %}
+                {% do temp.append(compile_config(line)) %}
+            {% endfor %}
+            {% set procedure_config = temp %}
+        {% elif procedure_config is not none %}
+            {% set procedure_config = [procedure_config] %}
+        {% endif %}
     {% endif %}
-
-    {% set data_types = [] %}
 
     {% set target_relation = get_fully_qualified_relation(this) %}
-
-    {% if should_full_refresh() %}
-        {% set script_materialization = config.get('script_materialization', 'full refresh') %}
-    {% else %}
-        {% set script_materialization = config.get('script_materialization') %}
-    {% endif %}
 
     {% if script_materialization in ['table', 'view'] %}
         {% set target_relation = target_relation.incorporate(type=script_materialization) %}
     {% endif %}
 
     {% if script_materialization is not none %}
-        {% do drop_relation_unless(target_relation, script_materialization) %}
+        {% if drop_if is none %}
+            {% do drop_relation(target_relation, unless_type=script_materialization) %}
+        {% else %}
+            {% set query | replace('\n            ', '\n') %}
+                {{ drop_if }}
+            ->> select iff(count(*) = 0, 'create if not exists', 'create or replace') from $1
+            {% endset %}
+
+            {% set drop_result = drop_relation(target_relation, unless_type=script_materialization, query=query) %}
+
+            {% if drop_result['DDL'] == 'create or replace' and drop_result.get('type') == script_materialization %}
+                {% do drop_relation(target_relation, unless_type=none) %}
+            {% endif %}
+        {% endif %}
     {% endif %}
 
     -- setup
@@ -36,31 +53,32 @@
     --------------------------------------------------------------------------------------------------------------------
     -- build model
 
-    {% set script_block %}
-        with run_all as procedure()
-            returns {{ returns }}
-            {%- if language is not none %}
-            {%- for language_name, language_configs in language.items() %}
-            language {{ language_name }}
-            {%- for language_config in language_configs %}
-            {{ language_config }}
-            {%- endfor %}
-            {%- endfor %}
-            {%- endif %}
-        as '{{ quote_sql(sql) }}'
+    {% if anonymous_procedure is mapping %}
+        {% set query | replace('\n            ', '\n') %}
+            with anonymous_procedure as procedure()
+                returns {{ returns }}
+                {%- if procedure_config is not none %}
+                {%- for line in procedure_config %}
+                {{ line }}
+                {%- endfor %}
+                {%- endif %}
+            as '{{ escape_ansii(sql) }}'
 
-        call run_all()
-    {% endset %}
+            call anonymous_procedure()
+        {% endset %}
+    {% else %}
+        {% set query = sql %}
+    {% endif %}
 
-    {% set uncommented = uncomment_sql(sql.strip().lower()) %}
-
-    {% call statement('main') %}
-        {%- if uncommented.startswith('declare') or uncommented.startswith('begin') %}
-        {{ sql_run_safe(script_block) }}
-        {%- else %}
-        {{ sql }}
-        {%- endif %}
-    {% endcall %}
+    {% if ';' in query %}
+        {%- call statement('main') -%}
+            execute immediate '{{ escape_ansii(query) }}'
+        {%- endcall -%}
+    {% else %}
+        {%- call statement('main') -%}
+            {{ query }}
+        {%- endcall -%}
+    {% endif %}
 
     --------------------------------------------------------------------------------------------------------------------
     -- build model
@@ -73,6 +91,10 @@
     {% do unset_query_tag(original_query_tag) %}
 
     -- return
-    {{ return({'relations': [target_relation]}) }}
+    {% if script_materialization in ['table', 'view'] %}
+        {{ return({'relations': [this.incorporate(type=script_materialization)]}) }}
+    {% else %}
+        {{ return({'relations': [this]}) }}
+    {% endif %}
 
 {% endmaterialization %}

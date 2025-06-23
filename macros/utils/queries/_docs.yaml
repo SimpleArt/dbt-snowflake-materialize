@@ -1,0 +1,11 @@
+version: 2
+
+macros:
+  - name: escape_ansii
+    description: Replaces (some) special characters with ANSII escaped characters. Used to submit queries through the dbt-snowflake connector that would break otherwise.
+  - name: get_columns_in_query
+    description: Returns the output columns of a query without running it.
+  - name: identifier_to_string
+    description: Converts an identifier into a string. Handles double quoted identifiers. Opposite of using adapter.quote.
+  - name: is_queryable
+    description: Checks if a query or relation is queryable.

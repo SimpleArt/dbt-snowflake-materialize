@@ -1,0 +1,23 @@
+version: 2
+
+macros:
+  - name: compile_config
+    description: Use in materializations to compile configurations like references.
+  - name: config_dict
+    description: Pass a dictionary into a config block.
+  - name: config_iterator
+    description: Pass an iterator into a config block.
+  - name: config_list
+    description: Pass a list into a config block.
+  - name: config_recursive
+    description: Returns a list of all arguments to be passed into a config block.
+  - name: config_ref
+    description: Pass a ref into a config block. Supports an additional "file" keyword argument for stage files.
+  - name: config_set
+    description: Pass a set into a config block. Supports an additional "file" keyword argument for stage files.
+  - name: config_source
+    description: Pass a source into a config block.
+  - name: config_string
+    description: Flag for an object to become quoted.
+  - name: config_tuple
+    description: Pass a tuple into a config block.

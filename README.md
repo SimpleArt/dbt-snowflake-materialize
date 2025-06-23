@@ -1,18 +1,17 @@
-# DBT-Snowflake: Advanced Materializations
+# DBT-Snowflake: Materialize
 
 This repository contains several custom materializations
-for dbt-snowflake. The source code for these materializations
-may be found in macros/materializations.
+for dbt-snowflake.
 
-Custom materializations include:
-- cache_function
-- clone_table
-- function
-- materialized_stream
-- materialized_view
-- persistent_table
-- persistent_view
-- procedure
-- stream
+Custom materializations (currently) include:
+- `function`
+- `insert_overwrite`
+- `procedure`
+- `script`
 
-For use cases and further details, see `/docs`.
+Custom incrementals include:
+- `merge_with_deletes`
+
+For docs, see `/docs`.
+
+For source code, see `/macros/materializations`.

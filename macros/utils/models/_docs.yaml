@@ -1,0 +1,7 @@
+version: 2
+
+macros:
+  - name: apply_model_grants
+    description: Applies grants based on model yaml file.
+  - name: persist_model_docs
+    description: Persists model description and/or column descriptions to the database.

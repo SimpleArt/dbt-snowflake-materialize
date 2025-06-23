@@ -1,4 +1,4 @@
-name: 'dbt_snowflake_advanced_materializations'
+name: 'dbt_snowflake_materialize'
 version: '1.0.0'
 config-version: 2
 
@@ -15,17 +15,3 @@ target-path: "target"
 clean-targets:
   - "target"
   - "dbt_packages"
-
-on-run-start:
-  - "{{ setup_functions_and_procs() }}"
-
-vars:
-  classy_client_id: "N/A"
-  classy_client_secret: "N/A"
-
-models:
-  dbt_snowflake_advanced_materializations:
-    +copy_grants: true
-    +persist_docs:
-      relation: true
-      columns: true

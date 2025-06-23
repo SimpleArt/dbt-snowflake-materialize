@@ -1,40 +1,39 @@
 {%- macro get_incremental_merge_with_deletes_sql(arg_dict) -%}
 
 {%- set unique_key = arg_dict["unique_key"] -%}
-{%- set columns = arg_dict["dest_columns"] -%}
+{%- set columns =  -%}
+{%- set merge_action = arg_dict["merge_action"] -%}
+
+{%- if unique_key is string -%}
+    {%- set unique_key = [unique_key] -%}
+{%- endif -%}
 
 merge into
-    {{ arg_dict["target_relation"] }} as destination
+    {{ arg_dict["target_relation"] }} as DBT_INTERNAL_DEST
 using
-    {{ arg_dict["temp_relation"] }} as source
+    {{ arg_dict["temp_relation"] }} as DBT_INTERNAL_SOURCE
 on
-    {%- if unique_key is string %}
-    destination.{{ unique_key }} is not distinct from source.{{ unique_key }}
-    {%- else %}
-    {% for key in unique_key -%}
-    destination.{{ key }} is not distinct from source.{{ key }}
-    {%- if not loop.last %}
-    and {% endif %}
+    {%- for key in unique_key %}
+    {{ 'and ' if not loop.first -}} DBT_INTERNAL_DEST.{{ key }} is not distinct from DBT_INTERNAL_SOURCE.{{ key }}
     {%- endfor %}
-    {%- endif %}
     {%- if arg_dict.get("incremental_predicates") is not none %}
     and {{ arg_dict.get("incremental_predicates") }}
     {%- endif %}
-when not matched and source.__merge_action__ = 'insert' then
+when not matched and DBT_INTERNAL_SOURCE.{{ arg_dict["merge_action"] }} = 'insert' then
     insert (
-        {%- for column in columns %}
-        {{ column.name }} {{- "," if not loop.last }}
+        {%- for column in arg_dict["dest_columns"] %}
+        {{ adapter.quote(column.name) }} {{- "," if not loop.last }}
         {%- endfor %}
     ) values (
         {%- for column in columns %}
-        source.{{ column.name }} {{- "," if not loop.last }}
+        DBT_INTERNAL_SOURCE.{{ column.name }} {{- "," if not loop.last }}
         {%- endfor %}
     )
-when matched and source.__merge_action__ = 'update' then
+when matched and DBT_INTERNAL_SOURCE.{{ arg_dict["merge_action"] }} = 'update' then
     update set
-        {%- for column in columns %}
-        {{ column.name }} = source.{{ column.name }} {{- "," if not loop.last }}
+        {%- for column in arg_dict["dest_columns"] %}
+        {{ adapter.quote(column.name) }} = DBT_INTERNAL_SOURCE.{{ adapter.quote(column.name) }} {{- "," if not loop.last }}
         {%- endfor %}
-when matched and source.__merge_action__ = 'delete' then
+when matched and DBT_INTERNAL_SOURCE.{{ arg_dict["merge_action"] }} = 'delete' then
     delete
 {%- endmacro -%}

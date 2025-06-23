@@ -1,0 +1,13 @@
+version: 2
+
+macros:
+  - name: array_difference
+    description: Returns the unique values in the first array not in the other arrays.
+  - name: array_intersect
+    description: Returns the unique values in all arrays.
+  - name: array_union
+    description: Returns the unique values in any array.
+  - name: array_unique
+    description: Returns the unique values in 1 array.
+  - name: get_ignore_case
+    description: If the key is in the mapping, returns that value. Otherwise, if a key that only differs by case-sensitivity is in the mapping, its value is returned. Otherwise the default is returned.
